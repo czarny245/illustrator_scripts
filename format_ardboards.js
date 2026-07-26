@@ -12,36 +12,57 @@ function main() {
     }
 
     var doc = app.activeDocument;
-    var columns = detectColumnCount(doc);
+    var layoutInfo = detectArtboardLayout(doc);
 
     resizeArtboardsToLetter(doc);
 
-    doc.rearrangeArtboards(RearrangeArtboardLayout.GridByRow, columns, SPACING_MM * PT_PER_MM, true);
+    doc.rearrangeArtboards(layoutInfo.layout, layoutInfo.rowsOrCols, SPACING_MM * PT_PER_MM, true);
 }
 
-// Reads the document's existing layout to figure out how many columns are
-// already in use: counts how many artboards, starting from the first,
-// share the same top coordinate (i.e. sit in the same row) before the
-// row changes.
-function detectColumnCount(doc) {
+// Reads the document's existing artboard order to figure out whether it's
+// arranged row-major (moves across a row before dropping to the next one)
+// or column-major (moves down a column before starting the next one), and
+// how many columns/rows are already in use - so rearrangeArtboards keeps
+// the same layout instead of assuming one.
+function detectArtboardLayout(doc) {
     var artboards = doc.artboards;
+
     if (artboards.length <= 1) {
-        return 1;
+        return { layout: DocumentArtboardLayout.GridByRow, rowsOrCols: 1 };
     }
 
-    var firstTop = artboards[0].artboardRect[1];
-    var columns = 1;
+    var firstRect = artboards[0].artboardRect;
+    var secondRect = artboards[1].artboardRect;
+
+    var sameTop = Math.abs(secondRect[1] - firstRect[1]) < 0.01;
+    var sameLeft = Math.abs(secondRect[0] - firstRect[0]) < 0.01;
+
+    if (sameLeft && !sameTop) {
+        // second artboard sits directly below the first -> column-major
+        return { layout: DocumentArtboardLayout.GridByCol, rowsOrCols: countRun(artboards, 0) };
+    }
+
+    // default / row-major: second artboard sits next to the first
+    return { layout: DocumentArtboardLayout.GridByRow, rowsOrCols: countRun(artboards, 1) };
+}
+
+// Counts how many consecutive artboards, starting from the first, share
+// the same coordinate at rectIndex (1 = top, for grouping into rows;
+// 0 = left, for grouping into columns).
+function countRun(artboards, rectIndex) {
+    var firstValue = artboards[0].artboardRect[rectIndex];
+    var count = 1;
 
     for (var i = 1; i < artboards.length; i++) {
-        var top = artboards[i].artboardRect[1];
-        if (Math.abs(top - firstTop) < 0.01) {
-            columns++;
+        var value = artboards[i].artboardRect[rectIndex];
+        if (Math.abs(value - firstValue) < 0.01) {
+            count++;
         } else {
             break;
         }
     }
 
-    return columns;
+    return count;
 }
 
 // 1: Resize every artboard to Letter format, keeping each artboard's
