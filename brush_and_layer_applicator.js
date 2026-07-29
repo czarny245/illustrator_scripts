@@ -15,6 +15,9 @@
 //    with the colour it belongs to, its thickness, and the layer its lines
 //    should end up on. A red line always gets the red brush, no matter how
 //    many colours are in the drawing or in what order they were selected.
+//    A shape that carries its colour as a fill rather than as a line counts
+//    too: it is given a line in that same colour, and then brushed. So
+//    anything step 1 recolours, step 2 brushes.
 //
 // 3. SORTS INTO LAYERS
 //    Only once all the recolouring and brushing is finished, every line is
@@ -28,10 +31,12 @@
 //
 // Anything whose colour is not listed in the "brushes" table is left completely
 // alone - black construction lines included. Clipping masks and guides are
-// never touched. Only lines get brushed; fills are only affected by step 1.
+// never touched.
 //
-// When it finishes, the script reports what it did and warns you about any
-// colours it found in the drawing but had no brush for.
+// When it finishes, the script reports what it did: how much it recoloured,
+// brushed and moved, and every colour it found in the drawing that had no
+// brush designated for it. If it ever brushes nothing, that list is where to
+// look - compare it against the "color" values in the brushes table.
 //
 // BEFORE YOU RUN IT
 // - The document must be in RGB colour mode (File > Document Color Mode).
@@ -127,30 +132,60 @@ if (app.documents.length > 0) {
 
     // STEP 2: decide which brush each path needs. Nothing is modified here, so
     // the whole drawing is inspected in its settled, fully recoloured state.
+    //
+    // The colour is taken from the stroke, and failing that from the fill.
+    // Step 1 recolours strokes AND fills, so a shape carrying its CAD colour as
+    // a fill must be able to claim its brush too - otherwise it gets recoloured
+    // and then silently left behind.
     var jobs = [];
     var unmatched = [];
     var seenUnmatched = {};
     var neededBrushNames = {};
+    var skippedStructural = 0; // clipping masks and guides
+    var skippedColourless = 0; // no RGB colour on stroke or fill at all
 
     for (var i = 0; i < records.length; i++) {
       var path = records[i].path;
 
-      // Clipping masks and guides are structural, never artwork
-      if (!path.stroked || path.clipping || path.guides) continue;
+      // Clipping masks and guides are structure, never artwork
+      if (path.clipping || path.guides) {
+        skippedStructural++;
+        continue;
+      }
 
-      var colorKey = colorToHex(path.strokeColor);
-      if (!colorKey) continue;
+      var strokeHex = path.stroked ? colorToHex(path.strokeColor) : null;
+      var fillHex = path.filled ? colorToHex(path.fillColor) : null;
 
-      var name = hexToBrushName[colorKey];
-      if (!name) {
-        if (!seenUnmatched[colorKey]) {
-          seenUnmatched[colorKey] = true;
-          unmatched.push(colorKey);
+      var colorKey = null;
+      var fromFill = false;
+
+      if (strokeHex && hexToBrushName[strokeHex]) {
+        colorKey = strokeHex;
+      } else if (fillHex && hexToBrushName[fillHex]) {
+        colorKey = fillHex;
+        fromFill = true;
+      }
+
+      if (!colorKey) {
+        // Record why, so a run that brushes nothing says what it saw instead
+        // of failing silently.
+        var seenHex = strokeHex ? strokeHex : fillHex;
+        if (!seenHex) {
+          skippedColourless++;
+        } else if (!seenUnmatched[seenHex]) {
+          seenUnmatched[seenHex] = true;
+          unmatched.push(seenHex);
         }
         continue;
       }
 
-      jobs.push({ record: records[i], brushName: name });
+      var name = hexToBrushName[colorKey];
+      jobs.push({
+        record: records[i],
+        brushName: name,
+        colorKey: colorKey,
+        fromFill: fromFill,
+      });
       neededBrushNames[name] = true;
     }
 
@@ -163,9 +198,19 @@ if (app.documents.length > 0) {
 
     // STEP 3: apply brushes and widths. These only change appearance, never
     // the document structure, so every reference gathered above stays valid.
+    var strokedFromFill = 0;
+
     for (var i = 0; i < jobs.length; i++) {
       var job = jobs[i];
+
+      // A brush lives on the stroke, so a shape that claimed its brush through
+      // its fill needs that colour put on its stroke first.
       job.record.path.stroked = true;
+      if (job.fromFill) {
+        job.record.path.strokeColor = hexToRGBColor(job.colorKey);
+        strokedFromFill++;
+      }
+
       brushByName[job.brushName].applyTo(job.record.path);
       job.record.path.strokeWidth = brushes[job.brushName].width;
     }
@@ -204,9 +249,16 @@ if (app.documents.length > 0) {
     }
 
     var report =
+      "Examined " +
+      records.length +
+      " path(s).\n" +
       "Recoloured " +
-      transitioned +
-      " item(s) via the CAD colour map.\n" +
+      transitioned.items +
+      " item(s) - " +
+      transitioned.strokes +
+      " stroke(s), " +
+      transitioned.fills +
+      " fill(s).\n" +
       "Brushed " +
       jobs.length +
       " line(s) and moved " +
@@ -215,10 +267,34 @@ if (app.documents.length > 0) {
       layerNamesUsed.length +
       " layer(s).";
 
+    if (strokedFromFill > 0) {
+      report +=
+        "\n\n" +
+        strokedFromFill +
+        " shape(s) took their brush colour from their fill and were given a " +
+        "matching stroke.";
+    }
+
     if (unmatched.length > 0) {
       report +=
         "\n\nLeft untouched - no brush designated for these colours:\n#" +
         unmatched.join("\n#");
+    }
+
+    if (skippedStructural > 0 || skippedColourless > 0) {
+      report +=
+        "\n\nSkipped " +
+        skippedStructural +
+        " clipping mask(s)/guide(s) and " +
+        skippedColourless +
+        " path(s) with no plain RGB colour on stroke or fill.";
+    }
+
+    if (jobs.length === 0 && transitioned.items > 0) {
+      report +=
+        "\n\nWARNING: items were recoloured but nothing was brushed. The " +
+        "colours above are the ones actually found on the artwork - compare " +
+        "them against the 'color' values in the brushes table.";
     }
 
     alert(report);
@@ -244,23 +320,28 @@ function collectPathRecords(items, out, unit) {
 }
 
 // Replace every stroke/fill colour that matches a key of the transition map
-// with the mapped colour. Returns the number of items that changed.
+// with the mapped colour. Returns { items, strokes, fills } - split out so the
+// closing report can show whether the colours live on strokes or on fills.
 function applyColorTransition(records, transitionMap) {
   var lookup = {};
   for (var hex in transitionMap) {
     lookup[normalizeHex(hex)] = hexToRGBColor(transitionMap[hex]);
   }
 
-  var changed = 0;
+  var result = { items: 0, strokes: 0, fills: 0 };
 
   for (var i = 0; i < records.length; i++) {
     var path = records[i].path;
     var itemChanged = false;
 
+    // Structure, not artwork - and step 2 will not brush these either
+    if (path.clipping || path.guides) continue;
+
     if (path.stroked) {
       var newStroke = lookup[colorToHex(path.strokeColor)];
       if (newStroke) {
         path.strokeColor = newStroke;
+        result.strokes++;
         itemChanged = true;
       }
     }
@@ -269,14 +350,15 @@ function applyColorTransition(records, transitionMap) {
       var newFill = lookup[colorToHex(path.fillColor)];
       if (newFill) {
         path.fillColor = newFill;
+        result.fills++;
         itemChanged = true;
       }
     }
 
-    if (itemChanged) changed++;
+    if (itemChanged) result.items++;
   }
 
-  return changed;
+  return result;
 }
 
 // Return the existing layer of that name, or create it. Reusing by name is what
