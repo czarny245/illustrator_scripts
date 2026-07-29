@@ -1,6 +1,7 @@
 // WHAT THIS SCRIPT DOES
 //
-// Select your artwork, run the script, and it does three things in order:
+// Select your artwork, run the script, and it works through your drawing in
+// four steps:
 //
 // 1. RECOLOURS
 //    Every selected line drawn in one of the old CAD colours is repainted in
@@ -9,28 +10,36 @@
 //    by the colour on the right.
 //
 // 2. APPLIES BRUSHES
-//    Every line then gets the brush that belongs to its colour. The "brushes"
-//    table below lists each brush together with the colour it belongs to and
-//    the line thickness it should be drawn at. A red line always gets the red
-//    brush, no matter how many colours are in the drawing or in what order
-//    they were selected.
+//    Every line then gets the brush that belongs to its colour, at the line
+//    thickness set for that brush. The "brushes" table below lists each brush
+//    with the colour it belongs to, its thickness, and the layer its lines
+//    should end up on. A red line always gets the red brush, no matter how
+//    many colours are in the drawing or in what order they were selected.
 //
 // 3. SORTS INTO LAYERS
-//    Every colour is moved onto its own new layer, so the finished drawing is
-//    separated by colour.
+//    Only once all the recolouring and brushing is finished, every line is
+//    moved onto the layer named in its brush's entry. If a layer with that
+//    name already exists it is reused, so you can run the script on one item
+//    at a time and everything still lands together on the same layers.
+//
+// The script looks inside groups and compound paths, so lines nested in them
+// are treated just like loose ones. Lines pulled out of a group end up loose
+// on their colour's layer. Compound paths stay whole and move as one piece.
 //
 // Anything whose colour is not listed in the "brushes" table is left completely
-// alone - black construction lines included. Only lines are affected; fills are
-// only touched by step 1.
+// alone - black construction lines included. Clipping masks and guides are
+// never touched. Only lines get brushed; fills are only affected by step 1.
 //
-// When it finishes, the script reports how many items it recoloured and warns
-// you about any colours it found in the drawing but had no brush for.
+// When it finishes, the script reports what it did and warns you about any
+// colours it found in the drawing but had no brush for.
 //
 // BEFORE YOU RUN IT
 // - The document must be in RGB colour mode (File > Document Color Mode).
 // - Every brush named in the table must already exist in the document's
 //   Brushes panel. If one is missing the script stops and tells you which,
 //   without having changed anything.
+// - Destination layers that are locked or hidden are unlocked and made
+//   visible so that lines can be moved onto them. They are left that way.
 //
 // TO CHANGE HOW IT BEHAVES
 // Edit the two tables below. Adding a colour means adding a line to both:
@@ -39,7 +48,6 @@
 
 if (app.documents.length > 0) {
   var doc = app.activeDocument;
-  // var selection = app.activeDocument.pathItems;
   var selection = app.selection;
 
   if (selection.length === 0) {
@@ -63,17 +71,33 @@ if (app.documents.length > 0) {
     };
 
     var brushes = {
-      Fishtail: { width: 0.6, color: "#E31A1C" },
-      "Dashed Line 1.2": { width: 0.6, color: "#1F78B4" },
-      Herringbone: { width: 0.6, color: "#33A02C" },
-      "Dashed Line 1.1": { width: 0.6, color: "#FF7F00" },
-      "Smooth ZigZag 1": { width: 2, color: "#6A3D9A" },
-      "Dashed Line 1.4": { width: 0.6, color: "#009688" },
-      "Bracket Brush": { width: 1, color: "#E7298A" },
-      "ZigZag 3": { width: 2, color: "#A65628" },
-      "Arrow 2": { width: 0.6, color: "#00838F" },
-      "Novelty 1": { width: 0.75, color: "#7A8F00" },
-      Ariel: { width: 0.6, color: "#003F88" },
+      Fishtail: { width: 0.6, color: "#E31A1C", layer: "Fishtail" },
+      "Dashed Line 1.2": {
+        width: 0.6,
+        color: "#1F78B4",
+        layer: "Dashed Line 1.2",
+      },
+      Herringbone: { width: 0.6, color: "#33A02C", layer: "Herringbone" },
+      "Dashed Line 1.1": {
+        width: 0.6,
+        color: "#FF7F00",
+        layer: "Dashed Line 1.1",
+      },
+      "Smooth ZigZag 1": {
+        width: 2,
+        color: "#6A3D9A",
+        layer: "Smooth ZigZag 1",
+      },
+      "Dashed Line 1.4": {
+        width: 0.6,
+        color: "#009688",
+        layer: "Dashed Line 1.4",
+      },
+      "Bracket Brush": { width: 1, color: "#E7298A", layer: "Bracket Brush" },
+      "ZigZag 3": { width: 2, color: "#A65628", layer: "ZigZag 3" },
+      "Arrow 2": { width: 0.25, color: "#00838F", layer: "Arrow 2" },
+      "Novelty 1": { width: 0.75, color: "#7A8F00", layer: "Novelty 1" },
+      Ariel: { width: 0.6, color: "#003F88", layer: "Ariel" },
     };
 
     // Invert the brush table into colour -> brush name, so a colour can look
@@ -94,71 +118,89 @@ if (app.documents.length > 0) {
       );
     }
 
-    // Colour transition pass: remap CAD colours before anything else, so the
-    // brush/layer grouping below keys off the final colours.
-    var transitioned = applyColorTransition(selection, CAD_colors_transition);
+    // Flatten the selection once, up front. Every step below works from this
+    // one list, so nothing depends on the shape of the selection any more.
+    var records = collectPathRecords(selection, [], null);
 
-    // First pass: collect the stroke colours actually present in the selection,
-    // split into the ones a brush is designated for and the ones without.
-    // Colours with no designated brush (black construction lines included) are
-    // reported at the end and otherwise left untouched.
-    var colors = []; // hex keys that have a brush, in first-seen order
-    var unmatched = []; // hex keys with no brush in the table
-    var seen = {};
+    // STEP 1: recolour.
+    var transitioned = applyColorTransition(records, CAD_colors_transition);
 
-    for (var i = 0; i < selection.length; i++) {
-      if (!selection[i].stroked || !selection[i].strokeColor) continue;
+    // STEP 2: decide which brush each path needs. Nothing is modified here, so
+    // the whole drawing is inspected in its settled, fully recoloured state.
+    var jobs = [];
+    var unmatched = [];
+    var seenUnmatched = {};
+    var neededBrushNames = {};
 
-      var colorKey = colorToHex(selection[i].strokeColor);
-      if (!colorKey || seen[colorKey]) continue;
-      seen[colorKey] = true;
+    for (var i = 0; i < records.length; i++) {
+      var path = records[i].path;
 
-      if (hexToBrushName[colorKey]) {
-        colors.push(colorKey);
-      } else {
-        unmatched.push(colorKey);
+      // Clipping masks and guides are structural, never artwork
+      if (!path.stroked || path.clipping || path.guides) continue;
+
+      var colorKey = colorToHex(path.strokeColor);
+      if (!colorKey) continue;
+
+      var name = hexToBrushName[colorKey];
+      if (!name) {
+        if (!seenUnmatched[colorKey]) {
+          seenUnmatched[colorKey] = true;
+          unmatched.push(colorKey);
+        }
+        continue;
       }
+
+      jobs.push({ record: records[i], brushName: name });
+      neededBrushNames[name] = true;
     }
 
     // Resolve every brush up front so a missing brush aborts before the
     // document has been modified.
-    var colorToBrush = {};
-    for (var i = 0; i < colors.length; i++) {
-      //alert("mapping " + colors[i] + " to " + hexToBrushName[colors[i]])
-      colorToBrush[colors[i]] = findBrush(doc, hexToBrushName[colors[i]]);
-    }
-    // Create color to layer mapping
-    var colorToLayer = {};
-    for (var i = 0; i < colors.length; i++) {
-      layer = activeDocument.layers.add();
-      colorToLayer[colors[i]] = layer;
+    var brushByName = {};
+    for (var needed in neededBrushNames) {
+      brushByName[needed] = findBrush(doc, needed);
     }
 
-    // Second pass: apply each colour's designated brush
-    for (var j = 0; j < selection.length; j++) {
-      var selectedItem = selection[j];
+    // STEP 3: apply brushes and widths. These only change appearance, never
+    // the document structure, so every reference gathered above stays valid.
+    for (var i = 0; i < jobs.length; i++) {
+      var job = jobs[i];
+      job.record.path.stroked = true;
+      brushByName[job.brushName].applyTo(job.record.path);
+      job.record.path.strokeWidth = brushes[job.brushName].width;
+    }
 
-      // Skip if not stroked or no stroke color
-      if (!selectedItem.stroked || !selectedItem.strokeColor) continue;
+    // STEP 4: move items onto their layers. This is the only step that changes
+    // the structure of the document, which is why it runs last - moving an item
+    // between containers reshuffles its neighbours and can invalidate
+    // references to items that have not been processed yet.
+    //
+    // A path inside a compound path cannot be moved on its own without breaking
+    // the compound path, so the whole compound path moves once instead.
+    var moveUnits = [];
+    var moveLayerNames = [];
 
-      var colorKey = colorToHex(selectedItem.strokeColor);
-      var brush = colorKey ? colorToBrush[colorKey] : null;
+    for (var i = 0; i < jobs.length; i++) {
+      var unit = jobs[i].record.unit;
+      if (indexOfItem(moveUnits, unit) !== -1) continue;
+      moveUnits.push(unit);
+      moveLayerNames.push(brushes[jobs[i].brushName].layer);
+    }
 
-      // No brush designated for this colour: leave the item alone
-      if (!brush) continue;
+    // Walk backwards: if a move does disturb the items behind it in a
+    // container, those have already been dealt with.
+    var layerCache = {};
+    for (var i = moveUnits.length - 1; i >= 0; i--) {
+      var layerName = moveLayerNames[i];
+      if (!layerCache[layerName]) {
+        layerCache[layerName] = getOrCreateLayer(doc, layerName);
+      }
+      moveUnits[i].move(layerCache[layerName], ElementPlacement.PLACEATEND);
+    }
 
-      selectedItem.stroked = true;
-
-      brush.applyTo(selectedItem);
-
-      // move path item to a separate layer
-
-      layer = colorToLayer[colorKey];
-      selectedItem.move(layer, ElementPlacement.PLACEATEND);
-
-      selectedItem.strokeWidth = brushes[brush.name].width;
-
-      //alert("applying " + brush.name + " to selected item");
+    var layerNamesUsed = [];
+    for (var used in layerCache) {
+      layerNamesUsed.push(used);
     }
 
     var report =
@@ -166,8 +208,12 @@ if (app.documents.length > 0) {
       transitioned +
       " item(s) via the CAD colour map.\n" +
       "Brushed " +
-      colors.length +
-      " colour group(s).";
+      jobs.length +
+      " line(s) and moved " +
+      moveUnits.length +
+      " item(s) onto " +
+      layerNamesUsed.length +
+      " layer(s).";
 
     if (unmatched.length > 0) {
       report +=
@@ -179,20 +225,36 @@ if (app.documents.length > 0) {
   }
 }
 
+// Flatten a selection down to the path items it contains, recording for each
+// one the item that should be moved on its behalf ("unit"). That is the path
+// itself, unless it lives inside a compound path - a compound path has to move
+// in one piece or it falls apart.
+function collectPathRecords(items, out, unit) {
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    if (item.typename === "PathItem") {
+      out.push({ path: item, unit: unit ? unit : item });
+    } else if (item.typename === "CompoundPathItem") {
+      collectPathRecords(item.pathItems, out, unit ? unit : item);
+    } else if (item.typename === "GroupItem") {
+      collectPathRecords(item.pageItems, out, unit);
+    }
+  }
+  return out;
+}
+
 // Replace every stroke/fill colour that matches a key of the transition map
 // with the mapped colour. Returns the number of items that changed.
-// Recurses into groups and compound paths, since CAD artwork is rarely flat.
-function applyColorTransition(items, transitionMap) {
+function applyColorTransition(records, transitionMap) {
   var lookup = {};
   for (var hex in transitionMap) {
     lookup[normalizeHex(hex)] = hexToRGBColor(transitionMap[hex]);
   }
 
-  var paths = collectPathItems(items, []);
   var changed = 0;
 
-  for (var i = 0; i < paths.length; i++) {
-    var path = paths[i];
+  for (var i = 0; i < records.length; i++) {
+    var path = records[i].path;
     var itemChanged = false;
 
     if (path.stroked) {
@@ -217,19 +279,29 @@ function applyColorTransition(items, transitionMap) {
   return changed;
 }
 
-// Flatten a selection (or any collection) down to the path items it contains.
-function collectPathItems(items, out) {
-  for (var i = 0; i < items.length; i++) {
-    var item = items[i];
-    if (item.typename === "PathItem") {
-      out.push(item);
-    } else if (item.typename === "CompoundPathItem") {
-      collectPathItems(item.pathItems, out);
-    } else if (item.typename === "GroupItem") {
-      collectPathItems(item.pageItems, out);
+// Return the existing layer of that name, or create it. Reusing by name is what
+// lets the script be run repeatedly, on one item at a time, and still collect
+// everything onto the same layers.
+function getOrCreateLayer(doc, name) {
+  for (var i = 0; i < doc.layers.length; i++) {
+    if (doc.layers[i].name === name) {
+      var existing = doc.layers[i];
+      // A locked or hidden layer refuses incoming items
+      existing.locked = false;
+      existing.visible = true;
+      return existing;
     }
   }
-  return out;
+  var layer = doc.layers.add();
+  layer.name = name;
+  return layer;
+}
+
+function indexOfItem(arr, item) {
+  for (var i = 0; i < arr.length; i++) {
+    if (arr[i] === item) return i;
+  }
+  return -1;
 }
 
 // "#RRGGBB" (any case, "#" optional) -> "rrggbb", for use as a lookup key.
@@ -285,4 +357,3 @@ function findBrush(doc, name) {
   }
   return brush;
 }
-
