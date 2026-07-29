@@ -1,25 +1,35 @@
+#target illustrator
+
 // WHAT THIS SCRIPT DOES
 //
 // Select your artwork, run the script, and it works through your drawing in
 // four steps:
 //
-// 1. RECOLOURS
+// 1. CHECKS EVERYTHING FIRST
+//    Before touching anything, the script reads the whole selection, works out
+//    what every path will need, and confirms that every needed brush really
+//    exists in the document's Brushes panel. If anything is missing or the
+//    tables below disagree with each other, it stops, tells you exactly what
+//    is wrong, and changes NOTHING. It never leaves the drawing half-done.
+//
+// 2. RECOLOURS
 //    Every selected line drawn in one of the old CAD colours is repainted in
 //    the matching production colour. The pairs are listed in the
 //    "CAD_colors_transition" table below - the colour on the left is replaced
 //    by the colour on the right.
 //
-// 2. APPLIES BRUSHES
+// 3. APPLIES BRUSHES
 //    Every line then gets the brush that belongs to its colour, at the line
 //    thickness set for that brush. The "brushes" table below lists each brush
 //    with the colour it belongs to, its thickness, and the layer its lines
 //    should end up on. A red line always gets the red brush, no matter how
 //    many colours are in the drawing or in what order they were selected.
 //    A shape that carries its colour as a fill rather than as a line counts
-//    too: it is given a line in that same colour, and then brushed. So
-//    anything step 1 recolours, step 2 brushes.
+//    too: it is given a line in that same colour, and then brushed.
+//    Recolouring and brushing are decided together, as one plan - so anything
+//    that gets recoloured is guaranteed to get its brush in the same run.
 //
-// 3. SORTS INTO LAYERS
+// 4. SORTS INTO LAYERS
 //    Only once all the recolouring and brushing is finished, every line is
 //    moved onto the layer named in its brush's entry. If a layer with that
 //    name already exists it is reused, so you can run the script on one item
@@ -33,272 +43,370 @@
 // alone - black construction lines included. Clipping masks and guides are
 // never touched.
 //
-// When it finishes, the script reports what it did: how much it recoloured,
-// brushed and moved, and every colour it found in the drawing that had no
-// brush designated for it. If it ever brushes nothing, that list is where to
-// look - compare it against the "color" values in the brushes table.
+// THE POPUP AT THE END
+// Every run finishes with a popup, and the popup's first line shows the script
+// version. If you ever run the script and see no popup, or a popup without a
+// version number, or an older version number, YOU ARE RUNNING AN OUTDATED COPY
+// of this file - replace it with the current one.
+// The popup also lists every colour found in the drawing that had no brush
+// designated for it, so a quiet run always explains itself.
 //
 // BEFORE YOU RUN IT
 // - The document must be in RGB colour mode (File > Document Color Mode).
-// - Every brush named in the table must already exist in the document's
-//   Brushes panel. If one is missing the script stops and tells you which,
-//   without having changed anything.
+// - Every brush named in the table must exist in the document's Brushes panel.
+//   Small differences in capitalisation or stray spaces around the panel name
+//   are forgiven; a genuinely absent brush stops the script before it changes
+//   anything, and the popup lists every missing brush by name.
 // - Destination layers that are locked or hidden are unlocked and made
 //   visible so that lines can be moved onto them. They are left that way.
 //
 // TO CHANGE HOW IT BEHAVES
 // Edit the two tables below. Adding a colour means adding a line to both:
 // one pair in "CAD_colors_transition", and one brush in "brushes" carrying
-// that same new colour.
+// that same new colour. The script checks the two tables against each other
+// on every run and refuses to start if they disagree.
 
-if (app.documents.length > 0) {
+var SCRIPT_TITLE = "Brush & Layer Applicator v5 (2026-07-29)";
+
+function main() {
+  if (app.documents.length === 0) {
+    alert(SCRIPT_TITLE + "\n\nOpen a document first.");
+    return;
+  }
   var doc = app.activeDocument;
-  var selection = app.selection;
+  var sel = app.selection;
 
-  if (selection.length === 0) {
-    alert("Please select an object first");
-  } else {
-    // CAD source colour -> production colour, matched on RGB hex.
-    // Illustrator has no hex colour type; these strings are parsed into
-    // RGBColor objects below, so the document must be in RGB mode.
-    var CAD_colors_transition = {
-      "#804040": "#E31A1C", // Red
-      "#ff8040": "#1F78B4", // Blue
-      "#00ff00": "#33A02C", // Green
-      "#008080": "#FF7F00", // Orange
-      "#004080": "#6A3D9A", // Purple
-      "#8080ff": "#009688", // Teal
-      "#800040": "#E7298A", // Magenta
-      "#ff0080": "#A65628", // Brown
-      "#800000": "#00838F", // Dark Cyan
-      "#ff8000": "#7A8F00", // Olive
-      "#008000": "#003F88", // Navy
-    };
+  if (!sel || sel.length === 0) {
+    alert(SCRIPT_TITLE + "\n\nPlease select an object first.");
+    return;
+  }
 
-    var brushes = {
-      Fishtail: { width: 0.6, color: "#E31A1C", layer: "Fishtail" },
-      "Dashed Line 1.2": {
-        width: 0.6,
-        color: "#1F78B4",
-        layer: "Dashed Line 1.2",
-      },
-      Herringbone: { width: 0.6, color: "#33A02C", layer: "Herringbone" },
-      "Dashed Line 1.1": {
-        width: 0.6,
-        color: "#FF7F00",
-        layer: "Dashed Line 1.1",
-      },
-      "Smooth ZigZag 1": {
-        width: 2,
-        color: "#6A3D9A",
-        layer: "Smooth ZigZag 1",
-      },
-      "Dashed Line 1.4": {
-        width: 0.6,
-        color: "#009688",
-        layer: "Dashed Line 1.4",
-      },
-      "Bracket Brush": { width: 1, color: "#E7298A", layer: "Bracket Brush" },
-      "ZigZag 3": { width: 2, color: "#A65628", layer: "ZigZag 3" },
-      "Arrow 2": { width: 0.25, color: "#00838F", layer: "Arrow 2" },
-      "Novelty 1": { width: 0.75, color: "#7A8F00", layer: "Novelty 1" },
-      Ariel: { width: 0.6, color: "#003F88", layer: "Ariel" },
-    };
+  // CAD source colour -> production colour, matched on RGB hex.
+  // Illustrator has no hex colour type; these strings are parsed into
+  // RGBColor objects below, so the document must be in RGB mode.
+  var CAD_colors_transition = {
+    "#804040": "#E31A1C", // Red
+    "#ff8040": "#1F78B4", // Blue
+    "#00ff00": "#33A02C", // Green
+    "#008080": "#FF7F00", // Orange
+    "#004080": "#6A3D9A", // Purple
+    "#8080ff": "#009688", // Teal
+    "#800040": "#E7298A", // Magenta
+    "#ff0080": "#A65628", // Brown
+    "#800000": "#00838F", // Dark Cyan
+    "#ff8000": "#7A8F00", // Olive
+    "#008000": "#003F88" // Navy
+  };
 
-    // Invert the brush table into colour -> brush name, so a colour can look
-    // up the brush that belongs to it. Both sides are normalised hex.
-    var hexToBrushName = {};
-    for (var brushName in brushes) {
-      hexToBrushName[normalizeHex(brushes[brushName].color)] = brushName;
-    }
+  var brushes = {
+    Fishtail: { width: 0.6, color: "#E31A1C", layer: "Fishtail" },
+    "Dashed Line 1.2": {
+      width: 0.6,
+      color: "#1F78B4",
+      layer: "Dashed Line 1.2"
+    },
+    Herringbone: { width: 0.6, color: "#33A02C", layer: "Herringbone" },
+    "Dashed Line 1.1": {
+      width: 0.6,
+      color: "#FF7F00",
+      layer: "Dashed Line 1.1"
+    },
+    "Smooth ZigZag 1": {
+      width: 2,
+      color: "#6A3D9A",
+      layer: "Smooth ZigZag 1"
+    },
+    "Dashed Line 1.4": {
+      width: 0.6,
+      color: "#009688",
+      layer: "Dashed Line 1.4"
+    },
+    "Bracket Brush": { width: 1, color: "#E7298A", layer: "Bracket Brush" },
+    "ZigZag 3": { width: 2, color: "#A65628", layer: "ZigZag 3" },
+    "Arrow 2": { width: 0.25, color: "#00838F", layer: "Arrow 2" },
+    "Novelty 1": { width: 0.75, color: "#7A8F00", layer: "Novelty 1" },
+    Ariel: { width: 0.6, color: "#003F88", layer: "Ariel" }
+  };
 
-    // Hex matching only works while the document stores RGB values. In a CMYK
-    // document Illustrator converts on assignment and the values never
-    // round-trip, so bail out before anything is modified.
-    if (doc.documentColorSpace !== DocumentColorSpace.RGB) {
-      throw new Error(
-        "Document is not in RGB mode. The CAD colour transition matches on " +
-          "RGB hex values, so convert the document (File > Document Color " +
-          "Mode > RGB Color) before running this script.",
+  // ------------------------------------------------------------------------
+  // PHASE A: CHECK THE TABLES AGAINST EACH OTHER (nothing touched yet)
+  // ------------------------------------------------------------------------
+
+  var configErrors = [];
+
+  // Invert the brush table into colour -> brush name, so a colour can look
+  // up the brush that belongs to it. Both sides are normalised hex.
+  var hexToBrushName = {};
+  for (var brushName in brushes) {
+    var brushHex = normalizeHex(brushes[brushName].color);
+    if (hexToBrushName[brushHex]) {
+      configErrors.push(
+        'Brushes "' +
+          hexToBrushName[brushHex] +
+          '" and "' +
+          brushName +
+          '" both claim colour #' +
+          brushHex +
+          "."
       );
     }
-
-    // Flatten the selection once, up front. Every step below works from this
-    // one list, so nothing depends on the shape of the selection any more.
-    var records = collectPathRecords(selection, [], null);
-
-    // STEP 1: recolour.
-    var transitioned = applyColorTransition(records, CAD_colors_transition);
-
-    // STEP 2: decide which brush each path needs. Nothing is modified here, so
-    // the whole drawing is inspected in its settled, fully recoloured state.
-    //
-    // The colour is taken from the stroke, and failing that from the fill.
-    // Step 1 recolours strokes AND fills, so a shape carrying its CAD colour as
-    // a fill must be able to claim its brush too - otherwise it gets recoloured
-    // and then silently left behind.
-    var jobs = [];
-    var unmatched = [];
-    var seenUnmatched = {};
-    var neededBrushNames = {};
-    var skippedStructural = 0; // clipping masks and guides
-    var skippedColourless = 0; // no RGB colour on stroke or fill at all
-
-    for (var i = 0; i < records.length; i++) {
-      var path = records[i].path;
-
-      // Clipping masks and guides are structure, never artwork
-      if (path.clipping || path.guides) {
-        skippedStructural++;
-        continue;
-      }
-
-      var strokeHex = path.stroked ? colorToHex(path.strokeColor) : null;
-      var fillHex = path.filled ? colorToHex(path.fillColor) : null;
-
-      var colorKey = null;
-      var fromFill = false;
-
-      if (strokeHex && hexToBrushName[strokeHex]) {
-        colorKey = strokeHex;
-      } else if (fillHex && hexToBrushName[fillHex]) {
-        colorKey = fillHex;
-        fromFill = true;
-      }
-
-      if (!colorKey) {
-        // Record why, so a run that brushes nothing says what it saw instead
-        // of failing silently.
-        var seenHex = strokeHex ? strokeHex : fillHex;
-        if (!seenHex) {
-          skippedColourless++;
-        } else if (!seenUnmatched[seenHex]) {
-          seenUnmatched[seenHex] = true;
-          unmatched.push(seenHex);
-        }
-        continue;
-      }
-
-      var name = hexToBrushName[colorKey];
-      jobs.push({
-        record: records[i],
-        brushName: name,
-        colorKey: colorKey,
-        fromFill: fromFill,
-      });
-      neededBrushNames[name] = true;
-    }
-
-    // Resolve every brush up front so a missing brush aborts before the
-    // document has been modified.
-    var brushByName = {};
-    for (var needed in neededBrushNames) {
-      brushByName[needed] = findBrush(doc, needed);
-    }
-
-    // STEP 3: apply brushes and widths. These only change appearance, never
-    // the document structure, so every reference gathered above stays valid.
-    var strokedFromFill = 0;
-
-    for (var i = 0; i < jobs.length; i++) {
-      var job = jobs[i];
-
-      // A brush lives on the stroke, so a shape that claimed its brush through
-      // its fill needs that colour put on its stroke first.
-      job.record.path.stroked = true;
-      if (job.fromFill) {
-        job.record.path.strokeColor = hexToRGBColor(job.colorKey);
-        strokedFromFill++;
-      }
-
-      brushByName[job.brushName].applyTo(job.record.path);
-      job.record.path.strokeWidth = brushes[job.brushName].width;
-    }
-
-    // STEP 4: move items onto their layers. This is the only step that changes
-    // the structure of the document, which is why it runs last - moving an item
-    // between containers reshuffles its neighbours and can invalidate
-    // references to items that have not been processed yet.
-    //
-    // A path inside a compound path cannot be moved on its own without breaking
-    // the compound path, so the whole compound path moves once instead.
-    var moveUnits = [];
-    var moveLayerNames = [];
-
-    for (var i = 0; i < jobs.length; i++) {
-      var unit = jobs[i].record.unit;
-      if (indexOfItem(moveUnits, unit) !== -1) continue;
-      moveUnits.push(unit);
-      moveLayerNames.push(brushes[jobs[i].brushName].layer);
-    }
-
-    // Walk backwards: if a move does disturb the items behind it in a
-    // container, those have already been dealt with.
-    var layerCache = {};
-    for (var i = moveUnits.length - 1; i >= 0; i--) {
-      var layerName = moveLayerNames[i];
-      if (!layerCache[layerName]) {
-        layerCache[layerName] = getOrCreateLayer(doc, layerName);
-      }
-      moveUnits[i].move(layerCache[layerName], ElementPlacement.PLACEATEND);
-    }
-
-    var layerNamesUsed = [];
-    for (var used in layerCache) {
-      layerNamesUsed.push(used);
-    }
-
-    var report =
-      "Examined " +
-      records.length +
-      " path(s).\n" +
-      "Recoloured " +
-      transitioned.items +
-      " item(s) - " +
-      transitioned.strokes +
-      " stroke(s), " +
-      transitioned.fills +
-      " fill(s).\n" +
-      "Brushed " +
-      jobs.length +
-      " line(s) and moved " +
-      moveUnits.length +
-      " item(s) onto " +
-      layerNamesUsed.length +
-      " layer(s).";
-
-    if (strokedFromFill > 0) {
-      report +=
-        "\n\n" +
-        strokedFromFill +
-        " shape(s) took their brush colour from their fill and were given a " +
-        "matching stroke.";
-    }
-
-    if (unmatched.length > 0) {
-      report +=
-        "\n\nLeft untouched - no brush designated for these colours:\n#" +
-        unmatched.join("\n#");
-    }
-
-    if (skippedStructural > 0 || skippedColourless > 0) {
-      report +=
-        "\n\nSkipped " +
-        skippedStructural +
-        " clipping mask(s)/guide(s) and " +
-        skippedColourless +
-        " path(s) with no plain RGB colour on stroke or fill.";
-    }
-
-    if (jobs.length === 0 && transitioned.items > 0) {
-      report +=
-        "\n\nWARNING: items were recoloured but nothing was brushed. The " +
-        "colours above are the ones actually found on the artwork - compare " +
-        "them against the 'color' values in the brushes table.";
-    }
-
-    alert(report);
+    hexToBrushName[brushHex] = brushName;
   }
+
+  // Normalised CAD hex -> normalised production hex. Every production colour
+  // must have a brush, otherwise recolouring could outrun brushing - the
+  // exact failure this script must never produce.
+  var transition = {};
+  for (var cadHex in CAD_colors_transition) {
+    var targetHex = normalizeHex(CAD_colors_transition[cadHex]);
+    transition[normalizeHex(cadHex)] = targetHex;
+    if (!hexToBrushName[targetHex]) {
+      configErrors.push(
+        "Transition target #" +
+          targetHex +
+          " (from #" +
+          normalizeHex(cadHex) +
+          ") has no brush in the brushes table."
+      );
+    }
+  }
+
+  if (configErrors.length > 0) {
+    alert(
+      SCRIPT_TITLE +
+        "\n\nThe two tables at the top of the script disagree. Nothing has " +
+        "been changed. Fix the table entries and run again:\n\n" +
+        configErrors.join("\n")
+    );
+    return;
+  }
+
+  // Hex matching only works while the document stores RGB values. In a CMYK
+  // document Illustrator converts on assignment and the values never
+  // round-trip, so stop before anything is modified.
+  if (doc.documentColorSpace !== DocumentColorSpace.RGB) {
+    alert(
+      SCRIPT_TITLE +
+        "\n\nDocument is not in RGB mode, so the colour tables cannot match " +
+        "anything. Nothing has been changed. Convert the document (File > " +
+        "Document Color Mode > RGB Color) and run again."
+    );
+    return;
+  }
+
+  // ------------------------------------------------------------------------
+  // PHASE B: PLAN (read-only - the document is still untouched)
+  //
+  // For every path, work out what its colours WILL be after the transition,
+  // and from that which brush it needs. Because this is computed from the
+  // tables rather than by mutating the artwork, the whole run can still be
+  // abandoned with zero changes if anything turns out to be missing.
+  // ------------------------------------------------------------------------
+
+  var records = collectPathRecords(sel, [], null);
+
+  var plan = [];
+  var unmatched = [];
+  var seenUnmatched = {};
+  var neededBrushNames = {};
+  var skippedStructural = 0; // clipping masks and guides
+  var skippedColourless = 0; // no RGB colour on stroke or fill at all
+
+  for (var i = 0; i < records.length; i++) {
+    var path = records[i].path;
+
+    // Clipping masks and guides are structure, never artwork
+    if (path.clipping || path.guides) {
+      skippedStructural++;
+      continue;
+    }
+
+    var strokeHex = path.stroked ? colorToHex(path.strokeColor) : null;
+    var fillHex = path.filled ? colorToHex(path.fillColor) : null;
+
+    // The colours this path will carry once the transition has run
+    var newStrokeHex = strokeHex && transition[strokeHex] ? transition[strokeHex] : null;
+    var newFillHex = fillHex && transition[fillHex] ? transition[fillHex] : null;
+    var finalStrokeHex = newStrokeHex ? newStrokeHex : strokeHex;
+    var finalFillHex = newFillHex ? newFillHex : fillHex;
+
+    // The brush is claimed by the stroke colour, and failing that by the
+    // fill - a shape carrying its CAD colour as a fill counts too.
+    var colorKey = null;
+    var fromFill = false;
+    if (finalStrokeHex && hexToBrushName[finalStrokeHex]) {
+      colorKey = finalStrokeHex;
+    } else if (finalFillHex && hexToBrushName[finalFillHex]) {
+      colorKey = finalFillHex;
+      fromFill = true;
+    }
+
+    if (!colorKey) {
+      // Record why, so a run that brushes nothing says what it saw instead
+      // of failing silently. (Transition targets always have a brush - the
+      // table check above guarantees it - so nothing recolourable lands here.)
+      var seenHex = finalStrokeHex ? finalStrokeHex : finalFillHex;
+      if (!seenHex) {
+        skippedColourless++;
+      } else if (!seenUnmatched[seenHex]) {
+        seenUnmatched[seenHex] = true;
+        unmatched.push(seenHex);
+      }
+      continue;
+    }
+
+    plan.push({
+      record: records[i],
+      brushName: hexToBrushName[colorKey],
+      colorKey: colorKey,
+      fromFill: fromFill,
+      newStrokeHex: newStrokeHex,
+      newFillHex: newFillHex
+    });
+    neededBrushNames[hexToBrushName[colorKey]] = true;
+  }
+
+  // Resolve every needed brush against the Brushes panel NOW, while the
+  // document is still untouched. A missing brush aborts the entire run with
+  // zero changes - never a recoloured-but-unbrushed drawing.
+  var resolved = resolveBrushes(doc, neededBrushNames);
+  if (resolved.missing.length > 0) {
+    alert(
+      SCRIPT_TITLE +
+        "\n\nThese brushes are not in this document's Brushes panel:\n\n" +
+        resolved.missing.join("\n") +
+        "\n\nNothing has been changed. Add the missing brushes to the " +
+        "document (or correct their names in the script) and run again."
+    );
+    return;
+  }
+
+  // ------------------------------------------------------------------------
+  // PHASE C: EXECUTE THE PLAN
+  // Everything needed is now in hand, so the plan runs to completion.
+  // ------------------------------------------------------------------------
+
+  // C1: recolour
+  var recoloured = { items: 0, strokes: 0, fills: 0 };
+  for (var i = 0; i < plan.length; i++) {
+    var entry = plan[i];
+    var itemChanged = false;
+    if (entry.newStrokeHex) {
+      entry.record.path.strokeColor = hexToRGBColor(entry.newStrokeHex);
+      recoloured.strokes++;
+      itemChanged = true;
+    }
+    if (entry.newFillHex) {
+      entry.record.path.fillColor = hexToRGBColor(entry.newFillHex);
+      recoloured.fills++;
+      itemChanged = true;
+    }
+    if (itemChanged) recoloured.items++;
+  }
+
+  // C2: apply brushes and widths. These only change appearance, never the
+  // document structure, so every reference gathered above stays valid.
+  var strokedFromFill = 0;
+  for (var i = 0; i < plan.length; i++) {
+    var entry = plan[i];
+    var p = entry.record.path;
+
+    // A brush lives on the stroke, so a shape that claimed its brush through
+    // its fill needs that colour put on its stroke first.
+    p.stroked = true;
+    if (entry.fromFill) {
+      p.strokeColor = hexToRGBColor(entry.colorKey);
+      strokedFromFill++;
+    }
+
+    resolved.byName[entry.brushName].applyTo(p);
+    p.strokeWidth = brushes[entry.brushName].width;
+  }
+
+  // C3: move items onto their layers. This is the only step that changes the
+  // structure of the document, which is why it runs last - moving an item
+  // between containers reshuffles its neighbours and can invalidate
+  // references to items that have not been processed yet.
+  //
+  // A path inside a compound path cannot be moved on its own without breaking
+  // the compound path, so the whole compound path moves once instead.
+  var moveUnits = [];
+  var moveLayerNames = [];
+  var lastUnit = null;
+
+  for (var i = 0; i < plan.length; i++) {
+    var unit = plan[i].record.unit;
+    if (unit === lastUnit) continue; // fast path: compound siblings are adjacent
+    lastUnit = unit;
+    if (indexOfItem(moveUnits, unit) !== -1) continue;
+    moveUnits.push(unit);
+    moveLayerNames.push(brushes[plan[i].brushName].layer);
+  }
+
+  // Walk backwards: if a move does disturb the items behind it in a
+  // container, those have already been dealt with.
+  var layerCache = {};
+  for (var i = moveUnits.length - 1; i >= 0; i--) {
+    var layerName = moveLayerNames[i];
+    if (!layerCache[layerName]) {
+      layerCache[layerName] = getOrCreateLayer(doc, layerName);
+    }
+    moveUnits[i].move(layerCache[layerName], ElementPlacement.PLACEATEND);
+  }
+
+  var layerNamesUsed = [];
+  for (var used in layerCache) {
+    layerNamesUsed.push(used);
+  }
+
+  // ------------------------------------------------------------------------
+  // REPORT
+  // ------------------------------------------------------------------------
+
+  var report =
+    SCRIPT_TITLE +
+    "\n\nExamined " +
+    records.length +
+    " path(s).\n" +
+    "Recoloured " +
+    recoloured.items +
+    " item(s) - " +
+    recoloured.strokes +
+    " stroke(s), " +
+    recoloured.fills +
+    " fill(s).\n" +
+    "Brushed " +
+    plan.length +
+    " line(s) and moved " +
+    moveUnits.length +
+    " item(s) onto " +
+    layerNamesUsed.length +
+    " layer(s).";
+
+  if (strokedFromFill > 0) {
+    report +=
+      "\n\n" +
+      strokedFromFill +
+      " shape(s) took their brush colour from their fill and were given a " +
+      "matching stroke.";
+  }
+
+  if (unmatched.length > 0) {
+    report +=
+      "\n\nLeft untouched - no brush designated for these colours:\n#" +
+      unmatched.join("\n#");
+  }
+
+  if (skippedStructural > 0 || skippedColourless > 0) {
+    report +=
+      "\n\nSkipped " +
+      skippedStructural +
+      " clipping mask(s)/guide(s) and " +
+      skippedColourless +
+      " path(s) with no plain RGB colour on stroke or fill.";
+  }
+
+  alert(report);
 }
 
 // Flatten a selection down to the path items it contains, recording for each
@@ -319,46 +427,35 @@ function collectPathRecords(items, out, unit) {
   return out;
 }
 
-// Replace every stroke/fill colour that matches a key of the transition map
-// with the mapped colour. Returns { items, strokes, fills } - split out so the
-// closing report can show whether the colours live on strokes or on fills.
-function applyColorTransition(records, transitionMap) {
-  var lookup = {};
-  for (var hex in transitionMap) {
-    lookup[normalizeHex(hex)] = hexToRGBColor(transitionMap[hex]);
+// Look up every needed brush in the document's Brushes panel. Exact name match
+// first; failing that, a forgiving match that ignores capitalisation and
+// leading/trailing spaces, so "fishtail " in the panel still finds Fishtail.
+// Returns { byName: {tableName: brush}, missing: [tableName, ...] }.
+function resolveBrushes(doc, neededNames) {
+  var byExact = {};
+  var byLoose = {};
+  for (var i = 0; i < doc.brushes.length; i++) {
+    var b = doc.brushes[i];
+    byExact[b.name] = b;
+    byLoose[looseName(b.name)] = b;
   }
 
-  var result = { items: 0, strokes: 0, fills: 0 };
-
-  for (var i = 0; i < records.length; i++) {
-    var path = records[i].path;
-    var itemChanged = false;
-
-    // Structure, not artwork - and step 2 will not brush these either
-    if (path.clipping || path.guides) continue;
-
-    if (path.stroked) {
-      var newStroke = lookup[colorToHex(path.strokeColor)];
-      if (newStroke) {
-        path.strokeColor = newStroke;
-        result.strokes++;
-        itemChanged = true;
-      }
+  var result = { byName: {}, missing: [] };
+  for (var name in neededNames) {
+    var brush = byExact[name] ? byExact[name] : byLoose[looseName(name)];
+    if (brush) {
+      result.byName[name] = brush;
+    } else {
+      result.missing.push(name);
     }
-
-    if (path.filled) {
-      var newFill = lookup[colorToHex(path.fillColor)];
-      if (newFill) {
-        path.fillColor = newFill;
-        result.fills++;
-        itemChanged = true;
-      }
-    }
-
-    if (itemChanged) result.items++;
   }
-
   return result;
+}
+
+function looseName(name) {
+  return String(name)
+    .toLowerCase()
+    .replace(/^\s+|\s+$/g, "");
 }
 
 // Return the existing layer of that name, or create it. Reusing by name is what
@@ -422,20 +519,18 @@ function channelToHex(value) {
   return hex.length < 2 ? "0" + hex : hex;
 }
 
-function findBrush(doc, name) {
-  var brush = null;
-  for (var i = 0; i < doc.brushes.length; i++) {
-    if (doc.brushes[i].name === name) {
-      brush = doc.brushes[i];
-      break;
-    }
-  }
-  if (!brush) {
-    var err =
-      "Brush [" +
-      name +
-      "] not found in document. Please make sure it exists in your Brushes panel.";
-    throw new Error(err);
-  }
-  return brush;
+// Run everything, and make sure ANY failure surfaces as a readable popup
+// instead of a cryptic dialog or a silent stop.
+try {
+  main();
+} catch (e) {
+  var crashMsg =
+    SCRIPT_TITLE +
+    "\n\nThe script stopped unexpectedly:\n" +
+    e;
+  if (e && e.line) crashMsg += "\n(line " + e.line + ")";
+  crashMsg +=
+    "\n\nSome changes may already have been applied. Undo (Ctrl+Z), fix the " +
+    "problem above, and run again.";
+  alert(crashMsg);
 }
