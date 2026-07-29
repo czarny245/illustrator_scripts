@@ -21,10 +21,12 @@ if (app.documents.length > 0) {
       "Dashed Line 1.4": 0.6,
       "ZigZag 3": 2,
       "Smooth ZigZag 1": 2,
-      "Dashed Line 1.4": 0.6,
       "Bracket Brush": 1,
       "Dashed Line 1.1": 0.6,
       "Arrow 2": 0.6,
+      Ariel: 0.6,
+      "Criss Cross 2": 0.6,
+      "Novelty 1": 0.75,
     };
 
     var brushNames = [];
@@ -40,9 +42,9 @@ if (app.documents.length > 0) {
         if (
           !contains(colors, colorKey) &&
           // SKIP BLACKS
-          colorKey !== "RGB_000" &&
-          colorKey !== "CMYK_000_100" &&
-          colorKey !== "GRAY_0"
+          colorKey !== "RGB_0_0_0" &&
+          colorKey !== "CMYK_0_0_0_100" &&
+          colorKey !== "GRAY_100"
         ) {
           colors.push(colorKey);
         }
@@ -53,11 +55,13 @@ if (app.documents.length > 0) {
       throw new Error("You have more colors that available brushes");
     }
 
-    // Create color to brush mapping
+    // Create color to brush mapping.
+    // Resolve every brush up front so a missing brush aborts before the
+    // document has been modified.
     var colorToBrush = {};
     for (var i = 0; i < colors.length; i++) {
       //alert("mapping " + colors[i] + " to " + brushNames[i])
-      colorToBrush[colors[i]] = brushNames[i];
+      colorToBrush[colors[i]] = findBrush(doc, brushNames[i]);
     }
     // Create color to layer mapping
     var colorToLayer = {};
@@ -77,13 +81,11 @@ if (app.documents.length > 0) {
 
       // SKIP BLACKS
       if (
-        colorKey !== "RGB_000" &&
-        colorKey !== "CMYK_000_100" &&
-        colorKey !== "GRAY_0"
+        colorKey !== "RGB_0_0_0" &&
+        colorKey !== "CMYK_0_0_0_100" &&
+        colorKey !== "GRAY_100"
       ) {
-        var brushName = colorToBrush[colorKey];
-
-        var brush = findBrush(doc, brushName);
+        var brush = colorToBrush[colorKey];
 
         selectedItem.stroked = true;
 
@@ -94,7 +96,7 @@ if (app.documents.length > 0) {
         layer = colorToLayer[colorKey];
         selectedItem.move(layer, ElementPlacement.PLACEATEND);
 
-        selectedItem.strokeWidth = brushes[brushName];
+        selectedItem.strokeWidth = brushes[brush.name];
 
         //alert("applying " + brushName + " to selected item");
       }
@@ -124,18 +126,20 @@ function findBrush(doc, name) {
 function getColorKey(color) {
   if (!color) return "none";
 
-  // Handle different color types
+  // Handle different color types.
+  // Components are always separated by "_" so that different colors cannot
+  // produce the same key (e.g. rgb(1,12,3) vs rgb(11,2,3)).
   if (color.typename === "RGBColor") {
-    //alert("detected coloUr RGB_" + color.red + "" + color.green + "" + color.blue);
-    return "RGB_" + color.red + "" + color.green + "" + color.blue;
+    //alert("detected coloUr RGB_" + color.red + "_" + color.green + "_" + color.blue);
+    return "RGB_" + color.red + "_" + color.green + "_" + color.blue;
   } else if (color.typename === "CMYKColor") {
-    //alert("detected coloUr CMYK_" + color.cyan + "" + color.magenta + "" + color.yellow + "_" + color.black);
+    //alert("detected coloUr CMYK_" + color.cyan + "_" + color.magenta + "_" + color.yellow + "_" + color.black);
     return (
       "CMYK_" +
       color.cyan +
-      "" +
+      "_" +
       color.magenta +
-      "" +
+      "_" +
       color.yellow +
       "_" +
       color.black
@@ -144,9 +148,8 @@ function getColorKey(color) {
     //alert("detected coloUr GRAY_" + color.gray);
     return "GRAY_" + color.gray;
   } else if (color.typename === "SpotColor") {
-    //alert("detected coloUr GRAY_" + color.gray);
-    //return "SPOT_" + color.spot.name;
-    return "SPOT_" + "what the hell is spot";
+    //alert("detected coloUr SPOT_" + color.spot.name + "_" + color.tint);
+    return "SPOT_" + color.spot.name + "_" + color.tint;
   } else {
     return "unknown";
   }
