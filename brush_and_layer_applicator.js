@@ -29,11 +29,19 @@
 //    Recolouring and brushing are decided together, as one plan - so anything
 //    that gets recoloured is guaranteed to get its brush in the same run.
 //
-// 4. SORTS INTO LAYERS
-//    Only once all the recolouring and brushing is finished, every line is
-//    moved onto the layer named in its brush's entry. If a layer with that
-//    name already exists it is reused, so you can run the script on one item
-//    at a time and everything still lands together on the same layers.
+// 4. SORTS INTO LAYERS, NAMED AFTER YOUR SIZES
+//    When the script starts it shows a small dialog: pick a sizing range
+//    (Letter, USA, UK, EU or Kids), then a starting size and an end size.
+//    Every size between the two stays in - USA from "2" to "4" gives 2, 3, 4.
+//    That trimmed list becomes the layer names. Each brush's "layer" number
+//    picks a size from the list: layer 0 gets the first chosen size, layer 1
+//    the second, and so on. Once all the recolouring and brushing is
+//    finished, every line is moved onto its size-named layer. If a layer
+//    with that name already exists it is reused, so you can run the script
+//    on one item at a time and everything still lands on the same layers.
+//    If a needed brush points past the last chosen size, the script stops
+//    BEFORE changing anything and tells you which brush and why. Pressing
+//    Cancel in the dialog also stops the script with nothing changed.
 //
 // The script looks inside groups and compound paths, so lines nested in them
 // are treated just like loose ones. Lines pulled out of a group end up loose
@@ -65,8 +73,11 @@
 // one pair in "CAD_colors_transition", and one brush in "brushes" carrying
 // that same new colour. The script checks the two tables against each other
 // on every run and refuses to start if they disagree.
+// A brush's "layer" is a position in the chosen size list, counted from 0 -
+// so with sizes S, M, L a brush with layer 1 lands on the "M" layer. The
+// size ranges themselves are the five lists at the top of main().
 
-var SCRIPT_TITLE = "Brush & Layer Applicator v5 (2026-07-29)";
+var SCRIPT_TITLE = "Brush & Layer Applicator v6 (2026-07-29)";
 
 function main() {
   if (app.documents.length === 0) {
@@ -80,6 +91,13 @@ function main() {
     alert(SCRIPT_TITLE + "\n\nPlease select an object first.");
     return;
   }
+
+  // available size ranges
+  var letter = ["3XS", "XXS", "XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL", "5XL"]
+  var usa = ['1', '2', '3', '4', '5']
+  var uk = ['2', '4', '6', '8', '10','12', '14', '16','18', '20', '22', '24']
+  var eu = ['30', '32', '34', '36', '38', '40', '42', '44', '46', '48', '50', '52']
+  var kids = ['0', '3m', '6m', '12m', '18m', '2', '3', '4', '5', '6', '7', '8', '9']
 
   // CAD source colour -> production colour, matched on RGB hex.
   // Illustrator has no hex colour type; these strings are parsed into
@@ -99,33 +117,33 @@ function main() {
   };
 
   var brushes = {
-    Fishtail: { width: 0.6, color: "#E31A1C", layer: "Fishtail" },
+    Fishtail: { width: 0.6, color: "#E31A1C", layer: 0 },
     "Dashed Line 1.2": {
       width: 0.6,
       color: "#1F78B4",
-      layer: "Dashed Line 1.2"
+      layer: 1,
     },
-    Herringbone: { width: 0.6, color: "#33A02C", layer: "Herringbone" },
+    Herringbone: { width: 0.6, color: "#33A02C", layer: 2 },
     "Dashed Line 1.1": {
       width: 0.6,
       color: "#FF7F00",
-      layer: "Dashed Line 1.1"
+      layer: 3,
     },
     "Smooth ZigZag 1": {
       width: 2,
       color: "#6A3D9A",
-      layer: "Smooth ZigZag 1"
+      layer: 4,
     },
     "Dashed Line 1.4": {
       width: 0.6,
       color: "#009688",
-      layer: "Dashed Line 1.4"
+      layer: 5
     },
-    "Bracket Brush": { width: 1, color: "#E7298A", layer: "Bracket Brush" },
-    "ZigZag 3": { width: 2, color: "#A65628", layer: "ZigZag 3" },
-    "Arrow 2": { width: 0.25, color: "#00838F", layer: "Arrow 2" },
-    "Novelty 1": { width: 0.75, color: "#7A8F00", layer: "Novelty 1" },
-    Ariel: { width: 0.6, color: "#003F88", layer: "Ariel" }
+    "Bracket Brush": { width: 1, color: "#E7298A", layer: 6 },
+    "ZigZag 3": { width: 2, color: "#A65628", layer: 7 },
+    "Arrow 2": { width: 0.25, color: "#00838F", layer: 8 },
+    "Novelty 1": { width: 0.75, color: "#7A8F00", layer: 9 },
+    Ariel: { width: 0.6, color: "#003F88", layer: 10 }
   };
 
   // ------------------------------------------------------------------------
@@ -191,6 +209,21 @@ function main() {
         "anything. Nothing has been changed. Convert the document (File > " +
         "Document Color Mode > RGB Color) and run again."
     );
+    return;
+  }
+
+  // Ask the user which sizes the layers should be named after. Cancelling
+  // the dialog aborts the whole run with nothing changed.
+  var sizeRanges = [
+    { name: "Letter", sizes: letter },
+    { name: "USA", sizes: usa },
+    { name: "UK", sizes: uk },
+    { name: "EU", sizes: eu },
+    { name: "Kids", sizes: kids }
+  ];
+  var chosenSizes = promptForSizes(sizeRanges);
+  if (!chosenSizes) {
+    alert(SCRIPT_TITLE + "\n\nCancelled - nothing has been changed.");
     return;
   }
 
@@ -264,6 +297,33 @@ function main() {
       newFillHex: newFillHex
     });
     neededBrushNames[hexToBrushName[colorKey]] = true;
+  }
+
+  // Every used brush must point at one of the chosen sizes. Checked BEFORE
+  // anything is modified, so a bad index aborts with zero changes - never a
+  // recoloured drawing that then fails at the layer step.
+  var badLayers = [];
+  for (var neededName in neededBrushNames) {
+    var layerIndex = brushes[neededName].layer;
+    if (layerIndex < 0 || layerIndex >= chosenSizes.sizes.length) {
+      badLayers.push('"' + neededName + '" points at layer index ' + layerIndex);
+    }
+  }
+  if (badLayers.length > 0) {
+    alert(
+      SCRIPT_TITLE +
+        "\n\nYour size selection (" +
+        chosenSizes.summary +
+        ") gives " +
+        chosenSizes.sizes.length +
+        " layer(s), indices 0 to " +
+        (chosenSizes.sizes.length - 1) +
+        " - but the artwork needs brushes that point outside that range:\n\n" +
+        badLayers.join("\n") +
+        "\n\nNothing has been changed. Pick a wider size range, or lower " +
+        "those 'layer' numbers in the brushes table, and run again."
+    );
+    return;
   }
 
   // Resolve every needed brush against the Brushes panel NOW, while the
@@ -340,7 +400,9 @@ function main() {
     lastUnit = unit;
     if (indexOfItem(moveUnits, unit) !== -1) continue;
     moveUnits.push(unit);
-    moveLayerNames.push(brushes[plan[i].brushName].layer);
+    // The brush's layer index picks the layer NAME from the chosen sizes.
+    // (The index was bounds-checked in the plan phase, before any changes.)
+    moveLayerNames.push(chosenSizes.sizes[brushes[plan[i].brushName].layer]);
   }
 
   // Walk backwards: if a move does disturb the items behind it in a
@@ -381,7 +443,10 @@ function main() {
     moveUnits.length +
     " item(s) onto " +
     layerNamesUsed.length +
-    " layer(s).";
+    " layer(s).\n" +
+    "Layers are named after: " +
+    chosenSizes.summary +
+    ".";
 
   if (strokedFromFill > 0) {
     report +=
@@ -407,6 +472,70 @@ function main() {
   }
 
   alert(report);
+}
+
+// Ask the user for a sizing range, a starting size and an end size, in one
+// dialog. Everything between start and end (inclusive) is kept - USA "2" to
+// "4" gives 2, 3, 4. Returns { sizes: [...], summary: "USA, 2 to 4" }, or
+// null if the user cancels.
+function promptForSizes(ranges) {
+  var dlg = new Window("dialog", SCRIPT_TITLE);
+  dlg.orientation = "column";
+  dlg.alignChildren = "left";
+
+  dlg.add("statictext", undefined, "Sizing range:");
+  var rangeNames = [];
+  for (var i = 0; i < ranges.length; i++) rangeNames.push(ranges[i].name);
+  var ddRange = dlg.add("dropdownlist", undefined, rangeNames);
+  ddRange.preferredSize = [220, -1];
+
+  dlg.add("statictext", undefined, "Starting size:");
+  var ddStart = dlg.add("dropdownlist", undefined, []);
+  ddStart.preferredSize = [220, -1];
+
+  dlg.add("statictext", undefined, "End size:");
+  var ddEnd = dlg.add("dropdownlist", undefined, []);
+  ddEnd.preferredSize = [220, -1];
+
+  var row = dlg.add("group");
+  var okBtn = row.add("button", undefined, "OK", { name: "ok" });
+  row.add("button", undefined, "Cancel", { name: "cancel" });
+
+  function refill(dd, items, selIndex) {
+    dd.removeAll();
+    for (var i = 0; i < items.length; i++) dd.add("item", items[i]);
+    dd.selection = selIndex;
+  }
+
+  // Picking a range fills start/end with that range's sizes: start defaults
+  // to the first size, end to the last (i.e. the whole range).
+  ddRange.onChange = function () {
+    var sizes = ranges[ddRange.selection.index].sizes;
+    refill(ddStart, sizes, 0);
+    refill(ddEnd, sizes, sizes.length - 1);
+  };
+  ddRange.selection = 0;
+  ddRange.onChange(); // some ScriptUI versions don't fire on programmatic set
+
+  // Validate on OK rather than juggling dependent dropdowns: a backwards
+  // pick just keeps the dialog open with an explanation.
+  okBtn.onClick = function () {
+    if (ddStart.selection.index > ddEnd.selection.index) {
+      alert("The starting size cannot come after the end size.");
+      return;
+    }
+    dlg.close(1);
+  };
+
+  if (dlg.show() !== 1) return null;
+
+  var range = ranges[ddRange.selection.index];
+  var from = ddStart.selection.index;
+  var to = ddEnd.selection.index;
+  return {
+    sizes: range.sizes.slice(from, to + 1),
+    summary: range.name + ", " + range.sizes[from] + " to " + range.sizes[to]
+  };
 }
 
 // Flatten a selection down to the path items it contains, recording for each
