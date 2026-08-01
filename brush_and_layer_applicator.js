@@ -65,6 +65,11 @@
 //   Small differences in capitalisation or stray spaces around the panel name
 //   are forgiven; a genuinely absent brush stops the script before it changes
 //   anything, and the popup lists every missing brush by name.
+//   The one exception is "[Basic]" (or "Basic"): that is the panel's "no brush"
+//   entry rather than a real brush, and Illustrator does not expose it to
+//   scripting at all. A colour whose brush is "[Basic]" gets its colour, its
+//   width and its layer, and is left with a plain unbrushed stroke. Note this
+//   cannot strip a brush a line already carries - it only declines to add one.
 // - Destination layers that are locked or hidden are unlocked and made
 //   visible so that lines can be moved onto them. They are left that way.
 //
@@ -77,7 +82,7 @@
 // so with sizes S, M, L a brush with layer 1 lands on the "M" layer. The
 // size ranges themselves are the five lists at the top of main().
 
-var SCRIPT_TITLE = "Brush & Layer Applicator v6 (2026-07-29)";
+var SCRIPT_TITLE = "Brush & Layer Applicator v7 (2026-08-01)";
 
 function main() {
   if (app.documents.length === 0) {
@@ -143,7 +148,7 @@ function main() {
     "ZigZag 3": { width: 1, color: "#A65628", layer: 7 },
     "Arrow 2": { width: 0.25, color: "#00838F", layer: 8 },
     "Novelty 1": { width: 0.75, color: "#7A8F00", layer: 9 },
-    Ariel: { width: 0.6, color: "#003F88", layer: 10 }
+    Ariel: { width: 0.6, color: "#003F88", layer: 10 },
     "[Basic]": {width: 0.6, color: "#000000", layer: 11}
   };
 
@@ -380,7 +385,10 @@ function main() {
       strokedFromFill++;
     }
 
-    resolved.byName[entry.brushName].applyTo(p);
+    // A [Basic] line keeps a plain stroke: colour and width only, no brush.
+    if (!isBasicBrushName(entry.brushName)) {
+      resolved.byName[entry.brushName].applyTo(p);
+    }
     p.strokeWidth = brushes[entry.brushName].width;
   }
 
@@ -572,6 +580,11 @@ function resolveBrushes(doc, neededNames) {
 
   var result = { byName: {}, missing: [] };
   for (var name in neededNames) {
+    // "[Basic]" is the Brushes panel's "no brush at all" entry. It is drawn in
+    // the panel like a brush, but it is not a Brush object and never appears in
+    // doc.brushes, so it can neither be found nor applied. Lines that ask for
+    // it get their colour and width and no brush - which is what [Basic] means.
+    if (isBasicBrushName(name)) continue;
     var brush = byExact[name] ? byExact[name] : byLoose[looseName(name)];
     if (brush) {
       result.byName[name] = brush;
@@ -580,6 +593,12 @@ function resolveBrushes(doc, neededNames) {
     }
   }
   return result;
+}
+
+// True for the panel's default no-brush entry, written either way round.
+function isBasicBrushName(name) {
+  var n = looseName(name);
+  return n === "basic" || n === "[basic]";
 }
 
 function looseName(name) {
