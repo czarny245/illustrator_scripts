@@ -48,8 +48,8 @@
 // on their colour's layer. Compound paths stay whole and move as one piece.
 //
 // Anything whose colour is not listed in the "brushes" table is left completely
-// alone - black construction lines included. Clipping masks and guides are
-// never touched.
+// alone. No colour is special-cased: black is judged by the tables exactly like
+// every other colour. Clipping masks and guides are never touched.
 //
 // THE POPUP AT THE END
 // Every run finishes with a popup, and the popup's first line shows the script
@@ -140,10 +140,11 @@ function main() {
       layer: 5
     },
     "Bracket Brush": { width: 1, color: "#E7298A", layer: 6 },
-    "ZigZag 3": { width: 2, color: "#A65628", layer: 7 },
+    "ZigZag 3": { width: 1, color: "#A65628", layer: 7 },
     "Arrow 2": { width: 0.25, color: "#00838F", layer: 8 },
     "Novelty 1": { width: 0.75, color: "#7A8F00", layer: 9 },
     Ariel: { width: 0.6, color: "#003F88", layer: 10 }
+    "[Basic]": {width: 0.6, color: "#000000", layer: 11}
   };
 
   // ------------------------------------------------------------------------
