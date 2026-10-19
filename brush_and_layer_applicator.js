@@ -82,80 +82,74 @@
 // so with sizes S, M, L a brush with layer 1 lands on the "M" layer. The
 // size ranges themselves are the five lists at the top of main().
 
-var SCRIPT_TITLE = "Brush & Layer Applicator v7 (2026-08-01)";
+var SCRIPT_TITLE = "Brush & Layer Applicator v8 (2026-10-19)";
 
-function main() {
-  if (app.documents.length === 0) {
-    alert(SCRIPT_TITLE + "\n\nOpen a document first.");
-    return;
-  }
-  var doc = app.activeDocument;
-  var sel = app.selection;
+// available size ranges
+var letter = ["3XS", "XXS", "XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL", "5XL"];
+var usa = ['1', '2', '3', '4', '5'];
+var uk = ['2', '4', '6', '8', '10','12', '14', '16','18', '20', '22', '24'];
+var eu = ['30', '32', '34', '36', '38', '40', '42', '44', '46', '48', '50', '52'];
+var kids = ['0', '3m', '6m', '12m', '18m', '2', '3', '4', '5', '6', '7', '8', '9'];
 
-  if (!sel || sel.length === 0) {
-    alert(SCRIPT_TITLE + "\n\nPlease select an object first.");
-    return;
-  }
+var sizeRanges = [
+  { name: "Letter", sizes: letter },
+  { name: "USA", sizes: usa },
+  { name: "UK", sizes: uk },
+  { name: "EU", sizes: eu },
+  { name: "Kids", sizes: kids }
+];
 
-  // available size ranges
-  var letter = ["3XS", "XXS", "XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL", "5XL"]
-  var usa = ['1', '2', '3', '4', '5']
-  var uk = ['2', '4', '6', '8', '10','12', '14', '16','18', '20', '22', '24']
-  var eu = ['30', '32', '34', '36', '38', '40', '42', '44', '46', '48', '50', '52']
-  var kids = ['0', '3m', '6m', '12m', '18m', '2', '3', '4', '5', '6', '7', '8', '9']
+// CAD source colour -> production colour, matched on RGB hex.
+// Illustrator has no hex colour type; these strings are parsed into
+// RGBColor objects below, so the document must be in RGB mode.
+var CAD_colors_transition = {
+  "#804040": "#E31A1C", // Red
+  "#ff8040": "#1F78B4", // Blue
+  "#00ff00": "#33A02C", // Green
+  "#008080": "#FF7F00", // Orange
+  "#004080": "#6A3D9A", // Purple
+  "#8080ff": "#009688", // Teal
+  "#800040": "#E7298A", // Magenta
+  "#ff0080": "#A65628", // Brown
+  "#800000": "#00838F", // Dark Cyan
+  "#ff8000": "#7A8F00", // Olive
+  "#008000": "#003F88"  // Navy
+};
 
-  // CAD source colour -> production colour, matched on RGB hex.
-  // Illustrator has no hex colour type; these strings are parsed into
-  // RGBColor objects below, so the document must be in RGB mode.
-  var CAD_colors_transition = {
-    "#804040": "#E31A1C", // Red
-    "#ff8040": "#1F78B4", // Blue
-    "#00ff00": "#33A02C", // Green
-    "#008080": "#FF7F00", // Orange
-    "#004080": "#6A3D9A", // Purple
-    "#8080ff": "#009688", // Teal
-    "#800040": "#E7298A", // Magenta
-    "#ff0080": "#A65628", // Brown
-    "#800000": "#00838F", // Dark Cyan
-    "#ff8000": "#7A8F00", // Olive
-    "#008000": "#003F88" // Navy
-  };
+var brushes = {
+  Fishtail: { width: 0.6, color: "#E31A1C", layer: 0 },
+  "Dashed Line 1.2": {
+    width: 0.6,
+    color: "#1F78B4",
+    layer: 1,
+  },
+  Herringbone: { width: 0.6, color: "#33A02C", layer: 2 },
+  "Dashed Line 1.1": {
+    width: 0.6,
+    color: "#FF7F00",
+    layer: 3,
+  },
+  "Smooth ZigZag 1": {
+    width: 2,
+    color: "#6A3D9A",
+    layer: 4,
+  },
+  "Dashed Line 1.4": {
+    width: 0.6,
+    color: "#009688",
+    layer: 5
+  },
+  "Bracket Brush": { width: 1, color: "#E7298A", layer: 6 },
+  "ZigZag 3": { width: 1, color: "#A65628", layer: 7 },
+  "Arrow 2": { width: 0.25, color: "#00838F", layer: 8 },
+  "Novelty 1": { width: 0.75, color: "#7A8F00", layer: 9 },
+  Ariel: { width: 0.6, color: "#003F88", layer: 10 },
+  "[Basic]": {width: 0.6, color: "#000000", layer: 11}
+};
 
-  var brushes = {
-    Fishtail: { width: 0.6, color: "#E31A1C", layer: 0 },
-    "Dashed Line 1.2": {
-      width: 0.6,
-      color: "#1F78B4",
-      layer: 1,
-    },
-    Herringbone: { width: 0.6, color: "#33A02C", layer: 2 },
-    "Dashed Line 1.1": {
-      width: 0.6,
-      color: "#FF7F00",
-      layer: 3,
-    },
-    "Smooth ZigZag 1": {
-      width: 2,
-      color: "#6A3D9A",
-      layer: 4,
-    },
-    "Dashed Line 1.4": {
-      width: 0.6,
-      color: "#009688",
-      layer: 5
-    },
-    "Bracket Brush": { width: 1, color: "#E7298A", layer: 6 },
-    "ZigZag 3": { width: 1, color: "#A65628", layer: 7 },
-    "Arrow 2": { width: 0.25, color: "#00838F", layer: 8 },
-    "Novelty 1": { width: 0.75, color: "#7A8F00", layer: 9 },
-    Ariel: { width: 0.6, color: "#003F88", layer: 10 },
-    "[Basic]": {width: 0.6, color: "#000000", layer: 11}
-  };
-
-  // ------------------------------------------------------------------------
-  // PHASE A: CHECK THE TABLES AGAINST EACH OTHER (nothing touched yet)
-  // ------------------------------------------------------------------------
-
+// Returns { hexToBrushName, transition, chosenSizes }, or undefined if the
+// run should stop (the reason has already been shown to the user).
+function prep_tables(doc) {
   var configErrors = [];
 
   // Invert the brush table into colour -> brush name, so a colour can look
@@ -178,8 +172,7 @@ function main() {
   }
 
   // Normalised CAD hex -> normalised production hex. Every production colour
-  // must have a brush, otherwise recolouring could outrun brushing - the
-  // exact failure this script must never produce.
+  // must have a brush, otherwise recolouring could outrun brushing
   var transition = {};
   for (var cadHex in CAD_colors_transition) {
     var targetHex = normalizeHex(CAD_colors_transition[cadHex]);
@@ -220,18 +213,40 @@ function main() {
 
   // Ask the user which sizes the layers should be named after. Cancelling
   // the dialog aborts the whole run with nothing changed.
-  var sizeRanges = [
-    { name: "Letter", sizes: letter },
-    { name: "USA", sizes: usa },
-    { name: "UK", sizes: uk },
-    { name: "EU", sizes: eu },
-    { name: "Kids", sizes: kids }
-  ];
   var chosenSizes = promptForSizes(sizeRanges);
   if (!chosenSizes) {
     alert(SCRIPT_TITLE + "\n\nCancelled - nothing has been changed.");
     return;
   }
+
+  return {
+    hexToBrushName: hexToBrushName,
+    transition: transition,
+    chosenSizes: chosenSizes
+  };
+}
+
+function main() {
+  if (app.documents.length === 0) {
+    alert(SCRIPT_TITLE + "\n\nOpen a document first.");
+    return;
+  }
+  var doc = app.activeDocument;
+  var sel = app.selection;
+
+  if (!sel || sel.length === 0) {
+    alert(SCRIPT_TITLE + "\n\nPlease select an object first.");
+    return;
+  }
+
+  // ------------------------------------------------------------------------
+  // PHASE A: CHECK THE TABLES AGAINST EACH OTHER (nothing touched yet)
+  // ------------------------------------------------------------------------
+  var tables = prep_tables(doc);
+  if (!tables) return; // prep_tables already told the user why
+  var hexToBrushName = tables.hexToBrushName;
+  var transition = tables.transition;
+  var chosenSizes = tables.chosenSizes;
 
   // ------------------------------------------------------------------------
   // PHASE B: PLAN (read-only - the document is still untouched)
@@ -244,97 +259,15 @@ function main() {
 
   var records = collectPathRecords(sel, [], null);
 
-  var plan = [];
-  var unmatched = [];
-  var seenUnmatched = {};
-  var neededBrushNames = {};
-  var skippedStructural = 0; // clipping masks and guides
-  var skippedColourless = 0; // no RGB colour on stroke or fill at all
+  var inspectedRecords = createFormatPlan(records, transition, hexToBrushName);
+  var plan = inspectedRecords.plan;
+  var unmatched = inspectedRecords.unmatched;
+  var neededBrushNames = inspectedRecords.neededBrushNames;
+  var skippedStructural = inspectedRecords.skippedStructural;
+  var skippedColourless = inspectedRecords.skippedColourless;
 
-  for (var i = 0; i < records.length; i++) {
-    var path = records[i].path;
-
-    // Clipping masks and guides are structure, never artwork
-    if (path.clipping || path.guides) {
-      skippedStructural++;
-      continue;
-    }
-
-    var strokeHex = path.stroked ? colorToHex(path.strokeColor) : null;
-    var fillHex = path.filled ? colorToHex(path.fillColor) : null;
-
-    // The colours this path will carry once the transition has run
-    var newStrokeHex = strokeHex && transition[strokeHex] ? transition[strokeHex] : null;
-    var newFillHex = fillHex && transition[fillHex] ? transition[fillHex] : null;
-    var finalStrokeHex = newStrokeHex ? newStrokeHex : strokeHex;
-    var finalFillHex = newFillHex ? newFillHex : fillHex;
-
-    // The brush is claimed by the stroke colour, and failing that by the
-    // fill - a shape carrying its CAD colour as a fill counts too.
-    var colorKey = null;
-    var fromFill = false;
-    if (finalStrokeHex && hexToBrushName[finalStrokeHex]) {
-      colorKey = finalStrokeHex;
-    } else if (finalFillHex && hexToBrushName[finalFillHex]) {
-      colorKey = finalFillHex;
-      fromFill = true;
-    }
-
-    if (!colorKey) {
-      // Record why, so a run that brushes nothing says what it saw instead
-      // of failing silently. (Transition targets always have a brush - the
-      // table check above guarantees it - so nothing recolourable lands here.)
-      var seenHex = finalStrokeHex ? finalStrokeHex : finalFillHex;
-      if (!seenHex) {
-        skippedColourless++;
-      } else if (!seenUnmatched[seenHex]) {
-        seenUnmatched[seenHex] = true;
-        unmatched.push(seenHex);
-      }
-      continue;
-    }
-
-    plan.push({
-      record: records[i],
-      brushName: hexToBrushName[colorKey],
-      colorKey: colorKey,
-      fromFill: fromFill,
-      newStrokeHex: newStrokeHex,
-      newFillHex: newFillHex
-    });
-    neededBrushNames[hexToBrushName[colorKey]] = true;
-  }
-
-  // Every used brush must point at one of the chosen sizes. Checked BEFORE
-  // anything is modified, so a bad index aborts with zero changes - never a
-  // recoloured drawing that then fails at the layer step.
-  var badLayers = [];
-  for (var neededName in neededBrushNames) {
-    var layerIndex = brushes[neededName].layer;
-    if (layerIndex < 0 || layerIndex >= chosenSizes.sizes.length) {
-      badLayers.push('"' + neededName + '" points at layer index ' + layerIndex);
-    }
-  }
-  if (badLayers.length > 0) {
-    alert(
-      SCRIPT_TITLE +
-        "\n\nYour size selection (" +
-        chosenSizes.summary +
-        ") gives " +
-        chosenSizes.sizes.length +
-        " layer(s), indices 0 to " +
-        (chosenSizes.sizes.length - 1) +
-        " - but the artwork needs brushes that point outside that range:\n\n" +
-        badLayers.join("\n") +
-        "\n\nNothing has been changed. Pick a wider size range, or lower " +
-        "those 'layer' numbers in the brushes table, and run again."
-    );
-    return;
-  }
-
-  // Resolve every needed brush against the Brushes panel NOW, while the
-  // document is still untouched. A missing brush aborts the entire run with
-  // zero changes - never a recoloured-but-unbrushed drawing.
+  // Resolve every needed brush against the Brushes panel. 
+  // A missing brush aborts the operation
   var resolved = resolveBrushes(doc, neededBrushNames);
   if (resolved.missing.length > 0) {
     alert(
@@ -564,6 +497,79 @@ function collectPathRecords(items, out, unit) {
   }
   return out;
 }
+
+// Inspect records found in the document and prepare a plan of action for formatting
+function createFormatPlan(records, transition) {
+  var plan = [];
+  var unmatched = [];
+  var seenUnmatched = {};
+  var neededBrushNames = {};
+  var skippedStructural = 0; // clipping masks and guides
+  var skippedColourless = 0; // no RGB colour on stroke or fill at all
+
+  for (var i = 0; i < records.length; i++) {
+    var path = records[i].path;
+
+    // Clipping masks and guides are structure, never artwork
+    if (path.clipping || path.guides) {
+      skippedStructural++;
+      continue;
+    }
+
+    var strokeHex = path.stroked ? colorToHex(path.strokeColor) : null;
+    var fillHex = path.filled ? colorToHex(path.fillColor) : null;
+
+    // The colours this path will carry once the transition has run
+    var newStrokeHex = strokeHex && transition[strokeHex] ? transition[strokeHex] : null;
+    var newFillHex = fillHex && transition[fillHex] ? transition[fillHex] : null;
+    var finalStrokeHex = newStrokeHex ? newStrokeHex : strokeHex;
+    var finalFillHex = newFillHex ? newFillHex : fillHex;
+
+    // The brush is claimed by the stroke colour, and failing that by the
+    // fill - a shape carrying its CAD colour as a fill counts too.
+    var colorKey = null;
+    var fromFill = false;
+    if (finalStrokeHex && hexToBrushName[finalStrokeHex]) {
+      colorKey = finalStrokeHex;
+    } else if (finalFillHex && hexToBrushName[finalFillHex]) {
+      colorKey = finalFillHex;
+      fromFill = true;
+    }
+
+    if (!colorKey) {
+      // Record why, so a run that brushes nothing says what it saw instead
+      // of failing silently. (Transition targets always have a brush - the
+      // table check above guarantees it - so nothing recolourable lands here.)
+      var seenHex = finalStrokeHex ? finalStrokeHex : finalFillHex;
+      if (!seenHex) {
+        skippedColourless++;
+      } else if (!seenUnmatched[seenHex]) {
+        seenUnmatched[seenHex] = true;
+        unmatched.push(seenHex);
+      }
+      continue;
+    }
+
+    plan.push({
+      record: records[i],
+      brushName: hexToBrushName[colorKey],
+      colorKey: colorKey,
+      fromFill: fromFill,
+      newStrokeHex: newStrokeHex,
+      newFillHex: newFillHex
+    });
+    neededBrushNames[hexToBrushName[colorKey]] = true;
+  }
+
+  return {
+    plan: plan,
+    unmatched: unmatched,
+    neededBrushNames: neededBrushNames,
+    skippedStructural: skippedStructural,
+    skippedColourless: skippedColourless
+    }
+}
+
 
 // Look up every needed brush in the document's Brushes panel. Exact name match
 // first; failing that, a forgiving match that ignores capitalisation and
