@@ -1,4 +1,4 @@
-#target illustrator
+//@target illustrator
 
 // WHAT THIS SCRIPT DOES
 //
@@ -33,15 +33,21 @@
 //    When the script starts it shows a small dialog: pick a sizing range
 //    (Letter, USA, UK, EU or Kids), then a starting size and an end size.
 //    Every size between the two stays in - USA from "2" to "4" gives 2, 3, 4.
-//    That trimmed list becomes the layer names. Each brush's "layer" number
-//    picks a size from the list: layer 0 gets the first chosen size, layer 1
-//    the second, and so on. Once all the recolouring and brushing is
-//    finished, every line is moved onto its size-named layer. If a layer
-//    with that name already exists it is reused, so you can run the script
-//    on one item at a time and everything still lands on the same layers.
-//    If a needed brush points past the last chosen size, the script stops
-//    BEFORE changing anything and tells you which brush and why. Pressing
+//    That trimmed list becomes the layer names. The brushes actually used by
+//    the selection are put in order of their "layer_index", and paired with
+//    the chosen sizes in that order: the lowest-numbered brush in use gets
+//    the first size, the next one the second size, and so on. So with sizes
+//    S, M, L and lines needing brushes 0, 4 and 11, they land on S, M and L.
+//    "[Basic]" has the highest number, so black lines always come last.
+//    Once all the recolouring and brushing is finished, every line is moved
+//    onto its size-named layer. If a layer with that name already exists it
+//    is reused. Because the pairing depends on which brushes are in the
+//    selection, select ALL the sizes' lines together - running on one size's
+//    lines alone would put them on the first size's layer.
+//    If the selection uses more brushes than sizes were chosen, the script
+//    stops BEFORE changing anything and lists the brushes in use. Pressing
 //    Cancel in the dialog also stops the script with nothing changed.
+//    The final popup lists which brush went onto which layer.
 //
 // The script looks inside groups and compound paths, so lines nested in them
 // are treated just like loose ones. Lines pulled out of a group end up loose
@@ -78,25 +84,64 @@
 // one pair in "CAD_colors_transition", and one brush in "brushes" carrying
 // that same new colour. The script checks the two tables against each other
 // on every run and refuses to start if they disagree.
-// A brush's "layer" is a position in the chosen size list, counted from 0 -
-// so with sizes S, M, L a brush with layer 1 lands on the "M" layer. The
-// size ranges themselves are the five lists at the top of main().
+// A brush's "layer_index" sets its place in the order brushes are paired with
+// sizes. Every brush needs a different whole number; only their order matters.
+// The size ranges themselves are the five lists below.
 
-var SCRIPT_TITLE = "Brush & Layer Applicator v8 (2026-10-19)";
+var SCRIPT_TITLE = "Brush & Layer Applicator v9 (2026-10-19)";
 
 // available size ranges
-var letter = ["3XS", "XXS", "XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL", "5XL"];
-var usa = ['1', '2', '3', '4', '5'];
-var uk = ['2', '4', '6', '8', '10','12', '14', '16','18', '20', '22', '24'];
-var eu = ['30', '32', '34', '36', '38', '40', '42', '44', '46', '48', '50', '52'];
-var kids = ['0', '3m', '6m', '12m', '18m', '2', '3', '4', '5', '6', '7', '8', '9'];
+var letter = [
+  "3XS",
+  "XXS",
+  "XS",
+  "S",
+  "M",
+  "L",
+  "XL",
+  "2XL",
+  "3XL",
+  "4XL",
+  "5XL",
+];
+var usa = ["1", "2", "3", "4", "5"];
+var uk = ["2", "4", "6", "8", "10", "12", "14", "16", "18", "20", "22", "24"];
+var eu = [
+  "30",
+  "32",
+  "34",
+  "36",
+  "38",
+  "40",
+  "42",
+  "44",
+  "46",
+  "48",
+  "50",
+  "52",
+];
+var kids = [
+  "0",
+  "3m",
+  "6m",
+  "12m",
+  "18m",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+];
 
 var sizeRanges = [
   { name: "Letter", sizes: letter },
   { name: "USA", sizes: usa },
   { name: "UK", sizes: uk },
   { name: "EU", sizes: eu },
-  { name: "Kids", sizes: kids }
+  { name: "Kids", sizes: kids },
 ];
 
 // CAD source colour -> production colour, matched on RGB hex.
@@ -113,38 +158,38 @@ var CAD_colors_transition = {
   "#ff0080": "#A65628", // Brown
   "#800000": "#00838F", // Dark Cyan
   "#ff8000": "#7A8F00", // Olive
-  "#008000": "#003F88"  // Navy
+  "#008000": "#003F88", // Navy
 };
 
 var brushes = {
-  Fishtail: { width: 0.6, color: "#E31A1C", layer: 0 },
+  Fishtail: { width: 0.6, color: "#E31A1C", layer_index: 0 },
   "Dashed Line 1.2": {
     width: 0.6,
     color: "#1F78B4",
-    layer: 1,
+    layer_index: 1,
   },
-  Herringbone: { width: 0.6, color: "#33A02C", layer: 2 },
+  Herringbone: { width: 0.6, color: "#33A02C", layer_index: 2 },
   "Dashed Line 1.1": {
     width: 0.6,
     color: "#FF7F00",
-    layer: 3,
+    layer_index: 3,
   },
   "Smooth ZigZag 1": {
     width: 2,
     color: "#6A3D9A",
-    layer: 4,
+    layer_index: 4,
   },
   "Dashed Line 1.4": {
     width: 0.6,
     color: "#009688",
-    layer: 5
+    layer_index: 5,
   },
-  "Bracket Brush": { width: 1, color: "#E7298A", layer: 6 },
-  "ZigZag 3": { width: 1, color: "#A65628", layer: 7 },
-  "Arrow 2": { width: 0.25, color: "#00838F", layer: 8 },
-  "Novelty 1": { width: 0.75, color: "#7A8F00", layer: 9 },
-  Ariel: { width: 0.6, color: "#003F88", layer: 10 },
-  "[Basic]": {width: 0.6, color: "#000000", layer: 11}
+  "Bracket Brush": { width: 1, color: "#E7298A", layer_index: 6 },
+  "ZigZag 3": { width: 1, color: "#A65628", layer_index: 7 },
+  "Arrow 2": { width: 0.25, color: "#00838F", layer_index: 8 },
+  "Novelty 1": { width: 0.75, color: "#7A8F00", layer_index: 9 },
+  Ariel: { width: 0.6, color: "#003F88", layer_index: 10 },
+  "[Basic]": { width: 0.6, color: "#000000", layer_index: 11 },
 };
 
 // Returns { hexToBrushName, transition, chosenSizes }, or undefined if the
@@ -165,10 +210,37 @@ function prep_tables(doc) {
           brushName +
           '" both claim colour #' +
           brushHex +
-          "."
+          ".",
       );
     }
     hexToBrushName[brushHex] = brushName;
+  }
+
+  // Brushes are paired with sizes in layer_index order, so every brush needs
+  // its own whole-number layer_index or that order would be ambiguous.
+  var layerIndexOwner = {};
+  for (var brushName in brushes) {
+    var layerIndex = brushes[brushName].layer_index;
+    if (
+      typeof layerIndex !== "number" ||
+      layerIndex !== Math.floor(layerIndex)
+    ) {
+      configErrors.push(
+        'Brush "' + brushName + '" has no whole-number layer_index.',
+      );
+    } else if (layerIndexOwner[layerIndex]) {
+      configErrors.push(
+        'Brushes "' +
+          layerIndexOwner[layerIndex] +
+          '" and "' +
+          brushName +
+          '" both have layer_index ' +
+          layerIndex +
+          ".",
+      );
+    } else {
+      layerIndexOwner[layerIndex] = brushName;
+    }
   }
 
   // Normalised CAD hex -> normalised production hex. Every production colour
@@ -183,7 +255,7 @@ function prep_tables(doc) {
           targetHex +
           " (from #" +
           normalizeHex(cadHex) +
-          ") has no brush in the brushes table."
+          ") has no brush in the brushes table.",
       );
     }
   }
@@ -193,7 +265,7 @@ function prep_tables(doc) {
       SCRIPT_TITLE +
         "\n\nThe two tables at the top of the script disagree. Nothing has " +
         "been changed. Fix the table entries and run again:\n\n" +
-        configErrors.join("\n")
+        configErrors.join("\n"),
     );
     return;
   }
@@ -206,7 +278,7 @@ function prep_tables(doc) {
       SCRIPT_TITLE +
         "\n\nDocument is not in RGB mode, so the colour tables cannot match " +
         "anything. Nothing has been changed. Convert the document (File > " +
-        "Document Color Mode > RGB Color) and run again."
+        "Document Color Mode > RGB Color) and run again.",
     );
     return;
   }
@@ -222,7 +294,7 @@ function prep_tables(doc) {
   return {
     hexToBrushName: hexToBrushName,
     transition: transition,
-    chosenSizes: chosenSizes
+    chosenSizes: chosenSizes,
   };
 }
 
@@ -266,7 +338,7 @@ function main() {
   var skippedStructural = inspectedRecords.skippedStructural;
   var skippedColourless = inspectedRecords.skippedColourless;
 
-  // Resolve every needed brush against the Brushes panel. 
+  // Resolve every needed brush against the Brushes panel.
   // A missing brush aborts the operation
   var resolved = resolveBrushes(doc, neededBrushNames);
   if (resolved.missing.length > 0) {
@@ -275,7 +347,27 @@ function main() {
         "\n\nThese brushes are not in this document's Brushes panel:\n\n" +
         resolved.missing.join("\n") +
         "\n\nNothing has been changed. Add the missing brushes to the " +
-        "document (or correct their names in the script) and run again."
+        "document (or correct their names in the script) and run again.",
+    );
+    return;
+  }
+
+  // Pair the brushes in use with the chosen sizes, in layer_index order.
+  // More brushes than sizes means some lines would have no layer to go to.
+  var sizeLayers = assignSizeLayers(neededBrushNames, chosenSizes.sizes);
+  if (sizeLayers.used.length > chosenSizes.sizes.length) {
+    alert(
+      SCRIPT_TITLE +
+        "\n\nThe selection uses " +
+        sizeLayers.used.length +
+        " brushes, but only " +
+        chosenSizes.sizes.length +
+        " size(s) were chosen (" +
+        chosenSizes.summary +
+        ").\n\nBrushes in use, in layer order:\n" +
+        sizeLayers.used.join("\n") +
+        "\n\nNothing has been changed. Choose a wider size range, or select " +
+        "fewer lines, and run again.",
     );
     return;
   }
@@ -342,9 +434,9 @@ function main() {
     lastUnit = unit;
     if (indexOfItem(moveUnits, unit) !== -1) continue;
     moveUnits.push(unit);
-    // The brush's layer index picks the layer NAME from the chosen sizes.
-    // (The index was bounds-checked in the plan phase, before any changes.)
-    moveLayerNames.push(chosenSizes.sizes[brushes[plan[i].brushName].layer]);
+    // The brush's rank among the brushes in use picks the layer NAME.
+    // (The count was checked against the sizes before any changes.)
+    moveLayerNames.push(sizeLayers.byBrush[plan[i].brushName]);
   }
 
   // Walk backwards: if a move does disturb the items behind it in a
@@ -389,6 +481,14 @@ function main() {
     "Layers are named after: " +
     chosenSizes.summary +
     ".";
+
+  if (sizeLayers.used.length > 0) {
+    report += "\n\nBrush -> layer:";
+    for (var i = 0; i < sizeLayers.used.length; i++) {
+      var usedName = sizeLayers.used[i];
+      report += "\n" + usedName + " -> " + sizeLayers.byBrush[usedName];
+    }
+  }
 
   if (strokedFromFill > 0) {
     report +=
@@ -476,7 +576,7 @@ function promptForSizes(ranges) {
   var to = ddEnd.selection.index;
   return {
     sizes: range.sizes.slice(from, to + 1),
-    summary: range.name + ", " + range.sizes[from] + " to " + range.sizes[to]
+    summary: range.name + ", " + range.sizes[from] + " to " + range.sizes[to],
   };
 }
 
@@ -499,7 +599,7 @@ function collectPathRecords(items, out, unit) {
 }
 
 // Inspect records found in the document and prepare a plan of action for formatting
-function createFormatPlan(records, transition) {
+function createFormatPlan(records, transition, hexToBrushName) {
   var plan = [];
   var unmatched = [];
   var seenUnmatched = {};
@@ -520,8 +620,10 @@ function createFormatPlan(records, transition) {
     var fillHex = path.filled ? colorToHex(path.fillColor) : null;
 
     // The colours this path will carry once the transition has run
-    var newStrokeHex = strokeHex && transition[strokeHex] ? transition[strokeHex] : null;
-    var newFillHex = fillHex && transition[fillHex] ? transition[fillHex] : null;
+    var newStrokeHex =
+      strokeHex && transition[strokeHex] ? transition[strokeHex] : null;
+    var newFillHex =
+      fillHex && transition[fillHex] ? transition[fillHex] : null;
     var finalStrokeHex = newStrokeHex ? newStrokeHex : strokeHex;
     var finalFillHex = newFillHex ? newFillHex : fillHex;
 
@@ -556,7 +658,7 @@ function createFormatPlan(records, transition) {
       colorKey: colorKey,
       fromFill: fromFill,
       newStrokeHex: newStrokeHex,
-      newFillHex: newFillHex
+      newFillHex: newFillHex,
     });
     neededBrushNames[hexToBrushName[colorKey]] = true;
   }
@@ -566,10 +668,28 @@ function createFormatPlan(records, transition) {
     unmatched: unmatched,
     neededBrushNames: neededBrushNames,
     skippedStructural: skippedStructural,
-    skippedColourless: skippedColourless
-    }
+    skippedColourless: skippedColourless,
+  };
 }
 
+// Sort the brushes this run needs by layer_index and give the first one the
+// first chosen size, the second one the second size, and so on - so with sizes
+// S, M, L and brushes with layer_index 0, 4, 11 in use, they get S, M, L.
+// Returns { used: [brushName, ...] in layer order, byBrush: {brushName: size} }.
+// Brushes beyond the number of sizes get no entry; the caller checks for that.
+function assignSizeLayers(neededBrushNames, sizes) {
+  var used = [];
+  for (var name in neededBrushNames) used.push(name);
+  used.sort(function (a, b) {
+    return brushes[a].layer_index - brushes[b].layer_index;
+  });
+
+  var byBrush = {};
+  for (var i = 0; i < used.length && i < sizes.length; i++) {
+    byBrush[used[i]] = sizes[i];
+  }
+  return { used: used, byBrush: byBrush };
+}
 
 // Look up every needed brush in the document's Brushes panel. Exact name match
 // first; failing that, a forgiving match that ignores capitalisation and
@@ -679,10 +799,7 @@ function channelToHex(value) {
 try {
   main();
 } catch (e) {
-  var crashMsg =
-    SCRIPT_TITLE +
-    "\n\nThe script stopped unexpectedly:\n" +
-    e;
+  var crashMsg = SCRIPT_TITLE + "\n\nThe script stopped unexpectedly:\n" + e;
   if (e && e.line) crashMsg += "\n(line " + e.line + ")";
   crashMsg +=
     "\n\nSome changes may already have been applied. Undo (Ctrl+Z), fix the " +
